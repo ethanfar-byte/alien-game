@@ -1,43 +1,61 @@
-# Alien Game (v2.0)
+# Alien Game (v2.1)
 
-A tactical cooperative sci-fi defense game built in GameMaker. Defend your 4 base towers against waves of hostile aliens, gather resources, forge blueprints at the workstation, and coordinate squad defenses!
-
----
-
-## 🚀 Quick Play (Downloadable Build)
-
-To play immediately without needing GameMaker:
-1. Download **[`Alien_Game_v2.0_Windows.zip`](./Alien_Game_v2.0_Windows.zip)** directly from this repository.
-2. Extract the `.zip` archive to any folder on your computer.
-3. Double-click **`Alien Game.exe`** to launch!
+A tactical co-op sci-fi defense game built in GameMaker. Hold the outpost for 17 days: gather resources, trade for gold, buy weapon blueprints, forge them onto your four towers, and survive the alien waves that hit the walls at the end of every day.
 
 ---
 
-## 🌟 Key Features
+## Quick Play (Downloadable Build)
 
-- **Local & Wi-Fi LAN Multiplayer (1–4 Players)**:
-  - Play offline pass-and-play or online with friends on the same Wi-Fi network.
-  - Automatic UDP broadcast room discovery & direct IP join.
-- **Asynchronous Squad Actions**:
-  - In multiplayer, every operative moves and performs their actions simultaneously and asynchronously on their own pawn.
-- **In-Game Squad Chat**:
-  - Live chat bar embedded in the combat log to coordinate strategies with your squad over Wi-Fi.
-- **Tactical Combat Phase & 2X Speed Toggle**:
-  - Station weapons at towers, select targets, and toggle **2X Attack Speed** in the top-right corner to fast-forward attack animations and projectile flights.
-- **Unique Role Restrictions**:
-  - Teams are limited to at most 1 operative of each specialist class (`Scout`, `Engineer`, `Miner`, `Gunner`, `Pathfinder`) alongside the versatile `Survivor` default.
-- **Blueprints & Base Economy**:
-  - Shop for weapon blueprints with Gold, mine minerals and gather forest resources, and craft mounted defenses at the Workstation.
+1. Download **[`Alien_Game_v2.1_Windows.zip`](./Alien_Game_v2.1_Windows.zip)**.
+2. Extract it anywhere.
+3. Run **`Alien Game.exe`**.
 
 ---
 
-## 🤖 AI Usage
+## How a Day Works
+
+- **Planning:** every operative has energy. Walk the map (1–2 energy per move), gather at the Forest and Caves, sell in Town, buy blueprints at the Shop and forge them onto towers at the Workstation.
+- **Defense:** when the squad is out of energy (or you press **Defend**), arm a tower weapon and click an alien to fire. Survivors strike back at your towers — mounted weapons absorb hits first.
+- Survive Day 17 and clear the final wave to win, or keep going in Endless Mode.
+
+## Controls
+
+| Key | Action |
+| --- | --- |
+| `W A S D` / Arrows | Move to a connected location (press two together for diagonals) |
+| Click a location | Move there, or interact if you're standing on it |
+| `E` | Interact with your current location |
+| `G` | Gather |
+| `C` / `X` | Forge Metal / Dismantle a tower weapon |
+| `S` `R` `T` | Shop, Workshop, Market |
+| `F` | Fire the tower weapon you're standing on |
+| `Space` | End turn (online: Ready Up) |
+| `B` | Start the defense phase (local play) |
+| `Tab` / `1`–`4` | Switch operative (local play) |
+| `Enter` | Chat / add a note to the log |
+| `Esc` | Pause menu · `F1` / `H` How to Play · `F11` Fullscreen |
+
+In the defense view: `1`–`4` arm a weapon, click an alien to fire, `Space` ends the volley / continues, `Tab` toggles 2x speed.
+
+## Multiplayer (Local Network, 2–4 Players)
+
+- **Host:** Play on LAN → Create Room. Your IP is shown in the lobby header.
+- **Join:** Play on LAN → rooms on the same Wi-Fi appear automatically, or click the Direct IP box, type the host's IP and press Enter.
+- The host runs the game simulation; everyone else sends their actions to the host and receives live state updates, so every screen stays in sync. Each player controls only their own operative. If someone disconnects mid-mission, their operative stands by so the squad isn't blocked.
+- Ports: TCP 6510 (game), UDP 6511 (room discovery). Allow the game through Windows Firewall when prompted.
+
+## Roles
+
+Each squad can have at most one of each specialist (`Scout`, `Combat Engineer`, `Cavern Miner`, `Gunner`, `Pathfinder`); `Survivor` can be picked by anyone.
+
+---
+
+## AI Usage
 
 - AI tools were used to assist in the coding process. No AI assets are used.
 
----
+## Building from Source
 
-## 🛠️ Requirements & Building from Source
-
-- **Engine**: GameMaker LTS (2026+)
-- Open `Alien Game.yyp` in GameMaker and click **Run** or use the Igor compile tool.
+- **Engine:** GameMaker 2026.1+
+- Open `Alien Game.yyp` and press **Run**.
+- Automated test scenarios can be run by launching the game with `-autotest ui_tour`, or two copies with `-autotest net_host` and `-autotest net_client`. Results and screenshots are written to `%LOCALAPPDATA%\Alien_Game\autotest\`.

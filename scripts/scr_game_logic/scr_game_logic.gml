@@ -188,7 +188,16 @@ function game_init_state(num_players = 4, chosen_class_indices = undefined, chos
     state.turn_popup_message = "";
     state.turn_popup_color = c_yellow;
     state.turn_popup_timer = 0;
-    
+    state.turn_popup_max = 1;
+    state.popup_seq = 0;
+    state.log_counter = 0;
+    state.action_log_cache_dirty = true;
+    state.action_log_cached_w = 0;
+    state.combat_texts = [];
+    state.tower_hit_flash = [0, 0, 0, 0];
+    state.pause_hover = -1;
+    state.help_page = 0;
+
     // Map data
     state.nodes = game_get_map_nodes();
     state.edges = game_get_map_edges();
@@ -268,7 +277,10 @@ function game_init_state(num_players = 4, chosen_class_indices = undefined, chos
         display_mode: "borderless", // "borderless" | "fullscreen" | "windowed"
         resolution_idx: 0,          // 0: 1920x1080, 1: 1600x900, 2: 1366x768, 3: 1280x720
         sfx_volume: 0.8,
-        slider_dragging: false
+        music_volume: 0.5,
+        slider_dragging: false,
+        music_dragging: false,
+        screen_shake: true
     };
     state.resolutions = [
         [1920, 1080, "1920 x 1080"],
@@ -502,97 +514,67 @@ function game_apply_display_settings(mode, res_w, res_h) {
 function game_log(state, msg) {
     array_insert(state.action_logs, 0, msg);
     if (array_length(state.action_logs) > 200) {
-        array_delete(state.action_logs, 200, 1);
+        array_delete(state.action_logs, 200, array_length(state.action_logs) - 200);
     }
+    state.log_counter = (state[$ "log_counter"] ?? 0) + 1;
+    state.action_log_cache_dirty = true;
     state.toast_message = msg;
     state.toast_timer = 180;
+    state.toast_is_error = false;
 }
 
-/// @desc Checks if current player ran out of energy, switching to next player with unused energy and triggering a popup
+/// @desc Called after any energy spend.
+/// Local play: hands control to the next operative that still has energy.
+/// Online play: marks this operative as finished; once every operative is finished the defense phase begins.
 function game_check_player_energy_depleted(state, player) {
-    if (player.energy <= 0) {
-        player.energy = 0;
-        
-        // In online multiplayer, each player plays asynchronously and only controls their own pawn
-        if (state.is_online) {
+    if (player.energy > 0) return false;
+    player.energy = 0;
+
+    if (state.is_online) {
+        if (!player.ended_turn) {
             player.ended_turn = true;
-            network_broadcast_action(state, "action_player_turn_done", { player_idx: state.net_my_player_idx });
-            state.toast_message = "Energy depleted! Waiting for squad mates...";
-            state.toast_timer = 120;
-            
-            if (game_check_all_players_ready(state)) {
-                for (var i = array_length(state.active_zone) - 1; i >= 0; i--) {
-                    if (!state.active_zone[i].alive) {
-                        array_delete(state.active_zone, i, 1);
-                    }
-                }
-                if (array_length(state.active_zone) == 0) {
-                    game_start_weapons_attack_phase(state);
-                    return true;
-                }
-                state.turn_popup_title = "ALL SQUAD OPERATIVES READY!";
-                state.turn_popup_message = "All squad operatives are ready. Initiating base defense phase!";
-                state.turn_popup_color = make_color_rgb(231, 76, 60);
-                state.turn_popup_timer = 180;
-                game_log(state, "All squad operatives are ready! Beginning Defense Phase.");
-                state.phase = "combat_weapons";
-                game_start_weapons_attack_phase(state);
-                return true;
-            }
-            return true;
+            game_log(state, player.name + " is out of energy and standing by.");
         }
-        
-        // Find next player with unused energy
-        var next_p_idx = -1;
-        for (var step = 1; step <= state.num_players; step++) {
-            var check_idx = (state.current_player_idx + step) % state.num_players;
-            if (state.players[check_idx].energy > 0) {
-                next_p_idx = check_idx;
-                break;
-            }
-        }
-        
-        if (next_p_idx >= 0 && next_p_idx != state.current_player_idx) {
-            state.current_player_idx = next_p_idx;
-            var next_p = state.players[next_p_idx];
-            
-            // Popup notification
-            state.turn_popup_title = string_upper(player.name) + " OUT OF ENERGY!";
-            state.turn_popup_message = "Turn automatically switched to " + next_p.name + " (" + string(next_p.energy) + " Energy remaining)";
-            state.turn_popup_color = next_p.color;
-            state.turn_popup_timer = 180;
-            
-            game_log(state, player.name + " ran out of Energy! Switched to " + next_p.name + ".");
-            game_play_sfx("click");
-            return true;
-        }
-        else {
-            // All players are out of energy!
-            // Clean dead aliens first to accurately check if any active threats exist
-            for (var i = array_length(state.active_zone) - 1; i >= 0; i--) {
-                if (!state.active_zone[i].alive) {
-                    array_delete(state.active_zone, i, 1);
-                }
-            }
-            
-            // If no hostiles or towers attacking, directly start the new day and skip combat UI!
-            if (array_length(state.active_zone) == 0) {
-                game_start_weapons_attack_phase(state);
-                return true;
-            }
-            
-            state.turn_popup_title = "ALL PLAYERS OUT OF ENERGY!";
-            state.turn_popup_message = "All team operatives have used their energy. Initiating base defense phase!";
-            state.turn_popup_color = make_color_rgb(231, 76, 60);
-            state.turn_popup_timer = 180;
-            
-            game_log(state, "All players are out of Energy! Beginning Defense Phase.");
-            state.phase = "combat_weapons";
-            game_start_weapons_attack_phase(state);
-            return true;
-        }
+        if (game_check_all_players_ready(state)) game_online_all_ready(state);
+        return true;
     }
-    return false;
+
+    var next_p_idx = -1;
+    for (var step = 1; step <= state.num_players; step++) {
+        var check_idx = (state.current_player_idx + step) % state.num_players;
+        if (state.players[check_idx].energy > 0) { next_p_idx = check_idx; break; }
+    }
+    if (next_p_idx >= 0 && next_p_idx != state.current_player_idx) {
+        state.current_player_idx = next_p_idx;
+        var next_p = state.players[next_p_idx];
+        game_popup(state, string_upper(next_p.name) + "'S TURN", player.name + " is out of energy  -  " + next_p.name + " has " + string(next_p.energy) + " energy", next_p.color, 150);
+        game_log(state, player.name + " ran out of Energy! Switched to " + next_p.name + ".");
+        game_sfx(state, "turn");
+        return true;
+    }
+    game_begin_defense(state);
+    return true;
+}
+
+/// @desc Online: every operative has finished acting for the day
+function game_online_all_ready(state) {
+    if (state.phase != "player_actions") return;
+    game_log(state, "All squad operatives are ready! Beginning Defense Phase.");
+    game_begin_defense(state);
+}
+
+/// @desc Ends the action phase: tactical combat if hostiles are present, otherwise straight to the next day
+function game_begin_defense(state) {
+    if (state.phase != "player_actions") return;
+    for (var i = array_length(state.active_zone) - 1; i >= 0; i--) {
+        if (!state.active_zone[i].alive) array_delete(state.active_zone, i, 1);
+    }
+    var n = array_length(state.active_zone);
+    if (n > 0) {
+        game_popup(state, "DEFENSE PHASE", string(n) + " hostile" + (n == 1 ? " is" : "s are") + " attacking the base. Man the weapons!", make_color_rgb(255, 84, 84), 150);
+        game_sfx(state, "alarm");
+    }
+    game_start_weapons_attack_phase(state);
 }
 
 function game_is_adjacent(state, node_a, node_b) {
@@ -629,15 +611,32 @@ function game_player_move(state, player, target_node) {
     player.energy -= move_cost;
     
     var old_node_key = player.node;
-    var old_node = state.nodes[$ old_node_key];
     var new_node = state.nodes[$ target_node];
+    game_player_anim_move(state, player, old_node_key, target_node);
+
+    player.node = target_node;
+    var node_name = new_node.name;
+    game_log(state, player.name + " moved to " + node_name + " (" + string(move_cost) + " Energy spent).");
+    game_sfx(state, "step");
     
+    // Auto-deposit upon reaching main_base
+    if (target_node == "main_base") {
+        game_player_deposit(state, player);
+    }
+    
+    game_check_player_energy_depleted(state, player);
+    return true;
+}
+
+/// @desc Starts the pawn glide animation between two nodes (used locally and when a snapshot reports a move)
+function game_player_anim_move(state, player, from_key, to_key) {
+    var old_node = state.nodes[$ from_key];
+    var new_node = state.nodes[$ to_key];
+    if (is_undefined(new_node)) return;
     var p_idx = player.id;
     var ox = (p_idx - 1.5) * 16;
     var oy = (p_idx % 2 == 0 ? -12 : 12);
-    
-    // Smooth animated movement setup
-    if (!variable_struct_exists(player, "anim_x")) {
+    if (!variable_struct_exists(player, "anim_x") && !is_undefined(old_node)) {
         player.anim_x = old_node.x + ox;
         player.anim_y = old_node.y + oy;
     }
@@ -648,22 +647,9 @@ function game_player_move(state, player, target_node) {
     player.is_moving = true;
     player.move_progress = 0.0;
     player.hop_y = 0;
-    
-    player.node = target_node;
-    var node_name = new_node.name;
-    game_log(state, player.name + " moved to " + node_name + " (" + string(move_cost) + " Energy spent).");
-    game_play_sfx("click");
-    
-    // Spawn departure dust puff
-    game_spawn_board_action_effect(state, old_node.x + ox, old_node.y + oy, "move_dust", player.color);
-    
-    // Auto-deposit upon reaching main_base
-    if (target_node == "main_base") {
-        game_player_deposit(state, player);
+    if (!is_undefined(old_node)) {
+        game_spawn_board_action_effect(state, old_node.x + ox, old_node.y + oy, "move_dust", player.color);
     }
-    
-    game_check_player_energy_depleted(state, player);
-    return true;
 }
 
 function game_player_deposit(state, player) {
@@ -776,6 +762,13 @@ function game_spawn_board_action_effect(state, ex, ey, type, color = c_white) {
 
 /// @desc Triggers an action animation on the player pawn and creates floating text feedback
 function game_trigger_player_action(state, player, action_type, text_label = "", text_color = c_white, custom_x = undefined, custom_y = undefined) {
+    var fx = { k: "act", p: player.id, a: action_type, t: text_label, c: text_color };
+    if (!is_undefined(custom_x)) { fx.x = custom_x; fx.y = custom_y; }
+    game_fx(state, fx);
+}
+
+/// @desc Local-only rendering half of game_trigger_player_action (pawn bounce, floating text, particles)
+function game_trigger_player_action_local(state, player, action_type, text_label = "", text_color = c_white, custom_x = undefined, custom_y = undefined) {
     player.action_anim = action_type;
     player.action_timer = 24;
     player.action_max = 24;
@@ -845,7 +838,7 @@ function game_player_gather(state, player) {
         player.backpack[$ card.resource] += amt;
         var rname = state.nodes[$ player.node].name;
         game_log(state, player.name + " drew " + card.name + " at " + rname + " (Added to Team Pool)!");
-        game_play_sfx("gather");
+        game_sfx(state, "gather");
         
         var res_defs = game_get_resource_definitions();
         var rdef = res_defs[$ card.resource];
@@ -859,7 +852,7 @@ function game_player_gather(state, player) {
         } else {
             player.energy = max(0, player.energy + card.energy_delta);
             game_log(state, player.name + ": " + card.name + " (" + card.desc + ")");
-            game_play_sfx("hit");
+            game_sfx(state, "hit");
             game_trigger_player_action(state, player, "event", card.name + " (" + string(card.energy_delta) + "E)", make_color_rgb(255, 100, 100));
         }
     }
@@ -888,7 +881,7 @@ function game_player_craft_metal(state, player) {
     state.storage.scrap -= 1;
     state.storage.metal += 1;
     game_log(state, player.name + " forged 1 Metal from 1 Stone and 1 Scrap (" + string(cost) + " Energy spent)!");
-    game_play_sfx("repair");
+    game_sfx(state, "repair");
     game_trigger_player_action(state, player, "craft", "+1 METAL FORGED", make_color_rgb(207, 216, 220));
     game_check_player_energy_depleted(state, player);
     return true;
@@ -910,7 +903,7 @@ function game_reroll_shop(state, player, is_free = false) {
         state.shop_reroll_cost += 2; // Keeps costing 2 more every time
         state.days_without_reroll = 0;
         state.rerolled_this_day = true;
-        game_play_sfx("coin");
+        game_sfx(state, "coin");
         game_log(state, player.name + " paid " + string(paid) + " Gold to reroll shop! (Next reroll: " + string(state.shop_reroll_cost) + "g)");
     }
     
@@ -1010,7 +1003,7 @@ function game_player_buy_blueprint(state, player, slot_or_item) {
     });
     
     game_log(state, player.name + " bought the " + item.name + " Blueprint (" + string(item.cost_gold) + "g)! Bring it to the Workstation to forge and mount it.");
-    game_play_sfx("buy");
+    game_sfx(state, "buy");
     game_trigger_player_action(state, player, "trade", "BOUGHT " + string_upper(item.name), make_color_rgb(255, 215, 0));
     
     // If deck is empty, reshuffle discard pile or create fresh deck
@@ -1121,7 +1114,7 @@ function game_player_craft_blueprint(state, player, bp_idx, target_tower_idx) {
     array_delete(state.blueprints, bp_idx, 1);
     
     game_log(state, player.name + " forged " + bp.name + " at the Workstation and mounted it to " + tower.name + "!");
-    game_play_sfx("buy");
+    game_sfx(state, "buy");
     game_trigger_player_action(state, player, "forge", "MOUNTED " + string_upper(bp.name), make_color_rgb(100, 230, 255));
     game_check_player_energy_depleted(state, player);
     return true;
@@ -1163,7 +1156,7 @@ function game_player_dismantle_weapon(state, player, tower_idx) {
     player.energy -= cost;
     
     game_log(state, player.name + " dismantled and destroyed the " + w_name + " at " + tower.name + " (+1 Scrap salvaged). Mount is now empty!");
-    game_play_sfx("hit");
+    game_sfx(state, "hit");
     game_trigger_player_action(state, player, "dismantle", "+1 SCRAP (DISMANTLED)", make_color_rgb(255, 120, 120));
     game_check_player_energy_depleted(state, player);
     return true;
@@ -1206,7 +1199,7 @@ function game_player_repair_tower(state, player, tower_idx, type) {
         tower.hp = min(tower.max_hp, tower.hp + 1 + rep_bonus);
         player.energy -= cost;
         game_log(state, player.name + " repaired " + tower.name + " (+" + string(1 + rep_bonus) + " HP).");
-        game_play_sfx("repair");
+        game_sfx(state, "repair");
         game_trigger_player_action(state, player, "repair", "+" + string(1 + rep_bonus) + " HP (" + tower.name + ")", make_color_rgb(76, 175, 80));
         game_check_player_energy_depleted(state, player);
         return true;
@@ -1224,7 +1217,7 @@ function game_player_repair_tower(state, player, tower_idx, type) {
         tower.hp = min(tower.max_hp, tower.hp + 3 + rep_bonus);
         player.energy -= cost;
         game_log(state, player.name + " fortified " + tower.name + " (+" + string(3 + rep_bonus) + " HP).");
-        game_play_sfx("repair");
+        game_sfx(state, "repair");
         game_trigger_player_action(state, player, "repair", "+" + string(3 + rep_bonus) + " HP (" + tower.name + ")", make_color_rgb(0, 229, 255));
         game_check_player_energy_depleted(state, player);
         return true;
@@ -1265,7 +1258,7 @@ function game_player_repair_weapon(state, player, weapon_idx, method, res_choice
         w.hp = min(w.max_hp, w.hp + 2 + rep_bonus);
         player.energy -= cost;
         game_log(state, player.name + " repaired " + w.name + " (+" + string(2 + rep_bonus) + " HP).");
-        game_play_sfx("repair");
+        game_sfx(state, "repair");
         game_trigger_player_action(state, player, "repair", "+" + string(2 + rep_bonus) + " HP (" + w.name + ")", make_color_rgb(76, 175, 80));
         game_check_player_energy_depleted(state, player);
         return true;
@@ -1283,7 +1276,7 @@ function game_player_repair_weapon(state, player, weapon_idx, method, res_choice
         w.hp = min(w.max_hp, w.hp + 4 + rep_bonus);
         player.energy -= cost;
         game_log(state, player.name + " infused " + w.name + " with Crystal (+" + string(4 + rep_bonus) + " HP).");
-        game_play_sfx("repair");
+        game_sfx(state, "repair");
         game_trigger_player_action(state, player, "repair", "+" + string(4 + rep_bonus) + " HP (" + w.name + ")", make_color_rgb(224, 64, 251));
         game_check_player_energy_depleted(state, player);
         return true;
@@ -1302,7 +1295,7 @@ function game_player_repair_weapon(state, player, weapon_idx, method, res_choice
         w.power_gem_used = true;
         player.energy -= cost;
         game_log(state, player.name + " restored " + w.name + " to FULL HEALTH with a Power Gem!");
-        game_play_sfx("repair");
+        game_sfx(state, "repair");
         game_trigger_player_action(state, player, "repair", "FULL REPAIR (" + w.name + ")", make_color_rgb(255, 215, 0));
         game_check_player_energy_depleted(state, player);
         return true;
@@ -1340,7 +1333,7 @@ function game_player_town_trade(state, player, res_type, amount) {
     state.storage.gold += total_gold;
     var bonus_str = (bonus > 0) ? (" (+" + string(bonus * amount) + " Favor Bonus!)") : "";
     game_log(state, player.name + " sold " + string(amount) + " " + res_type + " for " + string(total_gold) + " Gold" + bonus_str + " (" + string(cost) + " Energy spent).");
-    game_play_sfx("coin");
+    game_sfx(state, "coin");
     game_trigger_player_action(state, player, "trade", "+" + string(total_gold) + " GOLD", make_color_rgb(255, 215, 0));
     game_check_player_energy_depleted(state, player);
     return true;
@@ -1507,6 +1500,8 @@ function game_apply_weapon_damage(state, w, target_idx) {
     var overkill = max(0, dmg - target.hp);
     target.hp -= dmg;
     game_log(state, w.name + " dealt " + string(dmg) + " dmg to " + target.name + "!");
+    var d_anc = game_combat_alien_anchor(state, target_idx);
+    game_fx(state, { k: "dmg", x: d_anc[0], y: d_anc[1] - 30, t: "-" + string(dmg), c: (target.hp <= 0) ? make_color_rgb(255, 220, 80) : c_white, uid: target.uid, big: (dmg >= 8) });
     
     // Cryo Emitter freeze
     if (w.catalog_id == "cryo_emitter") {
@@ -1529,7 +1524,8 @@ function game_apply_weapon_damage(state, w, target_idx) {
     if (target.hp <= 0) {
         target.alive = false;
         game_log(state, target.name + " destroyed!");
-        game_play_sfx("hit");
+        game_sfx(state, "kill");
+        game_fx(state, { k: "shake", v: 6 });
         
         // Saboteur: deals 2 damage to killer weapon
         if (target.catalog_id == "saboteur") {
@@ -1772,10 +1768,7 @@ function game_start_weapons_attack_phase(state) {
                 arriving_str = " " + string(upcoming_count) + " aliens are arriving!";
             }
             
-            state.turn_popup_title = "NO HOSTILES DETECTED // A NEW DAY BEGINS";
-            state.turn_popup_message = "No hostiles detected and everyone has more energy this new day." + arriving_str;
-            state.turn_popup_color = make_color_rgb(105, 240, 174);
-            state.turn_popup_timer = 240;
+            game_popup(state, "DAY " + string(state.round_number) + "  //  ALL CLEAR", "No hostiles at the base. Energy restored." + arriving_str, make_color_rgb(105, 240, 174), 200);
             
             game_log(state, "No hostiles detected and everyone has more energy this new day." + arriving_str);
         }
@@ -1896,7 +1889,7 @@ function game_combat_select_tower(state, tower_idx) {
     var tw = state.towers[tower_idx];
     if (tw.alive && !is_undefined(tw.weapon) && tw.weapon.alive && !state.tower_weapon_used[tower_idx]) {
         state.combat_selected_tower = tower_idx;
-        game_play_sfx("click");
+        game_sfx(state, "click");
     }
 }
 
@@ -1910,10 +1903,7 @@ function game_combat_fire_tower_at_alien(state, target_idx) {
     
     // Scout Priority: if any scout is alive in active zone, players MUST target scout first!
     if (game_has_active_scout(state) && state.active_zone[target_idx].catalog_id != "scout") {
-        state.toast_message = "Scout ability: You must target the Scout alien first!";
-        state.toast_timer = 90;
-        game_log(state, "Scout ability active! You must target the Scout alien first.");
-        game_play_sfx("error");
+        game_log(state, "A Scout alien is alive - it must be destroyed before any other target!");
         return false;
     }
     
@@ -1933,7 +1923,7 @@ function game_combat_fire_tower_at_alien(state, target_idx) {
     });
     
     state.tower_weapon_shots[t] -= 1;
-    game_play_sfx("hit");
+    game_sfx(state, "shoot");
     
     // Check if this weapon has depleted its shots this wave
     if (state.tower_weapon_shots[t] <= 0) {
@@ -1965,23 +1955,23 @@ function game_combat_discharge_tesla(state) {
     
     var w = tw.weapon;
     game_log(state, "Tesla discharges electric shockwave hitting ALL aliens!");
-    game_play_sfx("hit");
-    state.screen_shake = max(state.screen_shake, 8);
+    game_sfx(state, "zap");
+    game_fx(state, { k: "shake", v: 9 });
     
     for (var a = 0; a < array_length(state.active_zone); a++) {
         var tgt = state.active_zone[a];
-        tgt.hp -= (w.damage + w.bonus_damage);
+        var t_dmg = w.damage + w.bonus_damage;
+        if (tgt.vulnerable) t_dmg += 1;
+        if (tgt.catalog_id == "armorback") t_dmg = max(1, t_dmg - 1);
+        if (tgt.catalog_id == "apex_predator") t_dmg = min(10, t_dmg);
+        tgt.hp -= t_dmg;
         tgt.tesla_weakened = true;
         if (tgt.hp <= 0) tgt.alive = false;
-        
-        // Spawn electric impact effect on each alien
-        var apos_x = 960;
-        var apos_y = 220;
-        if (a < array_length(state.combat_alien_coords)) {
-            apos_x = state.combat_alien_coords[a][0];
-            apos_y = state.combat_alien_coords[a][1] - 110;
-        }
-        game_spawn_combat_impact_effect(state, apos_x, apos_y, "player", "tesla");
+
+        // Electric impact + damage number on each alien
+        var anc = game_combat_alien_anchor(state, a);
+        game_fx(state, { k: "impact", x: anc[0], y: anc[1], o: "player", s: "tesla" });
+        game_fx(state, { k: "dmg", x: anc[0], y: anc[1] - 30, t: "-" + string(t_dmg), c: make_color_rgb(180, 255, 255), uid: tgt.uid, big: false });
     }
     for (var a = array_length(state.active_zone) - 1; a >= 0; a--) {
         if (!state.active_zone[a].alive) array_delete(state.active_zone, a, 1);
@@ -2026,6 +2016,7 @@ function game_combat_discharge_tesla(state) {
 function game_start_alien_attack_phase(state) {
     state.phase = "combat_aliens";
     state.combat_subphase = "alien_attacks";
+    state.combat_selected_tower = -1;
     state.combat_projectiles = [];
     state.alien_attack_idx = 0;
     state.alien_attack_delay = 15;
@@ -2058,7 +2049,7 @@ function game_spawn_next_alien_projectile(state) {
         state.phase = "game_over";
         state.modal = { type: "game_over" };
         game_log(state, "CRITICAL ALERT: All Base Towers have been destroyed! Humanity has fallen.");
-        game_play_sfx("alien");
+        game_sfx(state, "defeat");
         return false;
     }
     
@@ -2126,7 +2117,7 @@ function game_spawn_next_alien_projectile(state) {
             state.phase = "game_over";
             state.modal = { type: "game_over" };
             game_log(state, "CRITICAL ALERT: All Base Towers have been destroyed! Humanity has fallen.");
-            game_play_sfx("alien");
+            game_sfx(state, "defeat");
             return false;
         }
         
@@ -2136,7 +2127,7 @@ function game_spawn_next_alien_projectile(state) {
         // Drooper hits all alive towers simultaneously!
         if (alien.catalog_id == "drooper") {
             game_log(state, "Drooper carpet bombs all Defense Sectors!");
-            game_play_sfx("alien");
+            game_sfx(state, "alien");
             for (var d = 0; d < array_length(alive_towers); d++) {
                 array_push(state.combat_projectiles, {
                     alien: alien,
@@ -2154,7 +2145,7 @@ function game_spawn_next_alien_projectile(state) {
         
         // Standard single target selection
         var target_tower_idx = alive_towers[irandom(array_length(alive_towers) - 1)];
-        game_play_sfx("alien");
+        game_sfx(state, "alien");
         
         array_push(state.combat_projectiles, {
             alien: alien,
@@ -2181,8 +2172,10 @@ function game_apply_projectile_impact(state, p) {
     // Spawn impact burst effect on target tower/weapon
     var imp_x = (p.target_tower_idx < array_length(state.combat_tower_coords)) ? state.combat_tower_coords[p.target_tower_idx][0] : 960;
     var imp_y = (p.target_tower_idx < array_length(state.combat_tower_coords)) ? (state.combat_tower_coords[p.target_tower_idx][1] + 160) : 750;
-    game_spawn_combat_impact_effect(state, imp_x, imp_y, "alien", p.alien.catalog_id);
-    state.screen_shake = max(state.screen_shake, 7);
+    game_fx(state, { k: "impact", x: imp_x, y: imp_y, o: "alien", s: p.alien.catalog_id });
+    game_fx(state, { k: "shake", v: 7 });
+    game_fx(state, { k: "thit", t: p.target_tower_idx });
+    game_fx(state, { k: "dmg", x: imp_x, y: imp_y - 70, t: "-" + string(p.damage), c: make_color_rgb(255, 110, 90), uid: -1, big: (p.damage >= 5) });
     
     var atk_dmg = p.damage;
     var alien = p.alien;
@@ -2199,7 +2192,7 @@ function game_apply_projectile_impact(state, p) {
         var shield = state.weapons[shield_idx];
         shield.hp -= atk_dmg;
         game_log(state, "Shield Generator absorbed " + string(atk_dmg) + " dmg from " + alien.name + "!");
-        game_play_sfx("hit");
+        game_sfx(state, "hit");
         if (shield.hp <= 0) {
             shield.alive = false;
             game_log(state, "Shield Generator OVERLOAD! Discharge deals 4 dmg to all aliens!");
@@ -2221,7 +2214,7 @@ function game_apply_projectile_impact(state, p) {
     if (p.skips_weapon && has_active_wep) {
         target_tower.hp = max(0, target_tower.hp - atk_dmg);
         game_log(state, alien.name + " bypassed the mounted " + twep.name + " (Colossal ability) and struck " + target_tower.name + " directly for " + string(atk_dmg) + " dmg! (HP: " + string(target_tower.hp) + "/10)");
-        game_play_sfx("hit");
+        game_sfx(state, "hit");
         if (target_tower.hp <= 0) {
             target_tower.alive = false;
             game_log(state, target_tower.name + " DESTROYED!");
@@ -2243,7 +2236,7 @@ function game_apply_projectile_impact(state, p) {
         
         twep.hp -= wep_dmg;
         game_log(state, twep.name + " on " + target_tower.name + " intercepted projectile for " + string(wep_dmg) + " dmg! (Weapon HP: " + string(max(0, twep.hp)) + "/" + string(twep.max_hp) + ")");
-        game_play_sfx("hit");
+        game_sfx(state, "hit");
         
         if (twep.hp <= 0) {
             twep.alive = false;
@@ -2256,7 +2249,7 @@ function game_apply_projectile_impact(state, p) {
     // Tower takes damage directly (no mounted weapon)
     target_tower.hp = max(0, target_tower.hp - atk_dmg);
     game_log(state, alien.name + " projectile struck " + target_tower.name + " for " + string(atk_dmg) + " dmg! (HP: " + string(target_tower.hp) + "/10)");
-    game_play_sfx("hit");
+    game_sfx(state, "hit");
     if (target_tower.hp <= 0) {
         target_tower.alive = false;
         game_log(state, target_tower.name + " DESTROYED!");
@@ -2269,7 +2262,9 @@ function game_apply_projectile_impact(state, p) {
 
 function game_advance_wave_phase(state) {
     game_log(state, "--- REGROUP & WAVE ADVANCE ---");
-    game_play_sfx("wave");
+    game_sfx(state, "wave");
+    // Flamethrower vulnerability only lasts for the turn it was applied
+    for (var v = 0; v < array_length(state.active_zone); v++) state.active_zone[v].vulnerable = false;
     
     // 1. Hatchers spawn Hatchlings
     for (var i = 0; i < array_length(state.active_zone); i++) {
@@ -2304,6 +2299,7 @@ function game_advance_wave_phase(state) {
     for (var i = 0; i < array_length(state.weapons); i++) {
         if (state.weapons[i].alive && state.weapons[i].catalog_id == "resource_drone") {
             var d_key = (irandom(1) == 0) ? "forest" : "cave_1";
+            if (array_length(state.decks[$ d_key]) == 0) state.decks[$ d_key] = game_create_deck(d_key);
             var d_deck = state.decks[$ d_key];
             if (array_length(d_deck) > 0) {
                 var d_card = array_pop(d_deck);
@@ -2363,7 +2359,7 @@ function game_advance_wave_phase(state) {
             state.phase = "victory";
             state.modal = { type: "victory" };
             game_log(state, "VICTORY ACHIEVED! All aliens eliminated on the Final Wave!");
-            game_play_sfx("victory");
+            game_sfx(state, "victory");
             return;
         } else {
             // Hostiles still remain from Wave 17! Keep players on Wave 17 until eradicated
@@ -2386,6 +2382,7 @@ function game_advance_wave_phase(state) {
             state.current_player_idx = 0;
             state.phase = "player_actions";
             game_log(state, "Round 17 Final Stand continued! Prepare your defenses.");
+            game_popup(state, "FINAL STAND", "Hostiles remain - wipe them out to win!", make_color_rgb(255, 84, 84), 200);
             return;
         }
     }
@@ -2411,6 +2408,11 @@ function game_advance_wave_phase(state) {
     state.current_player_idx = 0;
     state.phase = "player_actions";
     game_log(state, "Round " + string(state.round_number) + " begun! Team ready.");
+    var inc = array_length(state.spawn_zone);
+    var act = array_length(state.active_zone);
+    var sub = (act > 0) ? (string(act) + " hostile" + (act == 1 ? "" : "s") + " at the walls") : "The perimeter is quiet";
+    if (inc > 0) sub += "  -  " + string(inc) + " more inbound";
+    game_popup(state, "DAY " + string(state.round_number) + " / 17", sub, (act > 0) ? make_color_rgb(255, 160, 64) : make_color_rgb(0, 210, 255), 200);
 }
 
 function game_end_current_player_turn(state) {
@@ -2425,10 +2427,441 @@ function game_end_current_player_turn(state) {
     }
     
     // If no players have energy left, proceed to combat or advance to next day if clear
-    game_start_weapons_attack_phase(state);
+    game_begin_defense(state);
 }
 
 function game_force_start_combat(state) {
-    game_start_weapons_attack_phase(state);
+    game_begin_defense(state);
 }
 
+// =============================================================================
+// PLAYER HELPERS
+// =============================================================================
+/// @desc Index of the operative controlled by THIS machine (online: my pawn, local: active pass-and-play operative)
+function game_local_player_idx(state) {
+    var idx = state.is_online ? state.net_my_player_idx : state.current_player_idx;
+    return clamp(idx, 0, max(0, array_length(state.players) - 1));
+}
+
+function game_local_player(state) {
+    return state.players[game_local_player_idx(state)];
+}
+
+/// @desc Tower index (0-3) the player is standing on, or -1
+function game_player_tower_idx(player) {
+    switch (player.node) {
+        case "tower_1": return 0;
+        case "tower_2": return 1;
+        case "tower_3": return 2;
+        case "tower_4": return 3;
+    }
+    return -1;
+}
+
+function game_task_cost(player) {
+    return (variable_struct_exists(player, "character") && player.character.id == "scout") ? 2 : 1;
+}
+
+function game_fire_cost(state, player) {
+    var cost = 2;
+    for (var i = 0; i < array_length(state.weapons); i++) {
+        if (state.weapons[i].alive && state.weapons[i].catalog_id == "overcharge_pylon") { cost = 1; break; }
+    }
+    if (variable_struct_exists(player, "character")) {
+        if (player.character.id == "gunner") cost = 1;
+        else if (player.character.id == "scout") cost = 2;
+    }
+    return cost;
+}
+
+/// @desc Repairs the weapon mounted on a tower using the first of its recipe materials that's in storage
+function game_player_repair_weapon_at_tower(state, player, tower_idx) {
+    if (tower_idx < 0 || tower_idx > 3) return false;
+    var w = state.towers[tower_idx].weapon;
+    if (is_undefined(w) || !w.alive) {
+        game_log(state, "Tower " + string(tower_idx + 1) + " has no weapon to repair.");
+        return false;
+    }
+    var wi = -1;
+    for (var i = 0; i < array_length(state.weapons); i++) if (state.weapons[i] == w) { wi = i; break; }
+    if (wi < 0) return false;
+    var rnames = variable_struct_get_names(w.cost_res);
+    var pick = "";
+    for (var r = 0; r < array_length(rnames); r++) {
+        if (state.storage[$ rnames[r]] >= 1) { pick = rnames[r]; break; }
+    }
+    if (pick == "") {
+        game_log(state, "Need 1 of " + w.name + "'s blueprint materials in storage to repair it.");
+        return false;
+    }
+    return game_player_repair_weapon(state, player, wi, "recipe_resource", pick);
+}
+
+// =============================================================================
+// POPUPS & SYNCED EFFECTS
+// =============================================================================
+/// @desc Big centered banner (synced to every player online)
+function game_popup(state, title, msg, color, timer = 180) {
+    state.turn_popup_title = title;
+    state.turn_popup_message = msg;
+    state.turn_popup_color = color;
+    state.turn_popup_timer = timer;
+    state.turn_popup_max = timer;
+    state.popup_seq = (state[$ "popup_seq"] ?? 0) + 1;
+}
+
+/// @desc Applies a visual/audio effect locally and, when hosting, queues it for every client
+function game_fx(state, fx) {
+    game_fx_apply(state, fx);
+    if (state.is_online && state.is_host && state.screen == "game") {
+        array_push(state.net_fx_queue, fx);
+    }
+}
+
+function game_sfx(state, name, vol = 1.0) {
+    game_fx(state, { k: "sfx", n: name, v: vol });
+}
+
+function game_fx_apply(state, fx) {
+    switch (fx.k) {
+        case "sfx":
+            game_play_sfx(fx.n, fx[$ "v"] ?? 1.0);
+            break;
+        case "act":
+            if (fx.p >= 0 && fx.p < array_length(state.players)) {
+                game_trigger_player_action_local(state, state.players[fx.p], fx.a, fx.t, fx.c, fx[$ "x"], fx[$ "y"]);
+            }
+            break;
+        case "impact":
+            game_spawn_combat_impact_effect(state, fx.x, fx.y, fx.o, fx.s);
+            break;
+        case "shake":
+            state.screen_shake = max(state.screen_shake, fx.v);
+            break;
+        case "dmg":
+            game_spawn_combat_text(state, fx.x, fx.y, fx.t, fx.c, fx[$ "big"] ?? false);
+            var uid = fx[$ "uid"] ?? -1;
+            for (var a = 0; a < array_length(state.active_zone); a++) {
+                if (state.active_zone[a].uid == uid) state.active_zone[a].flash = 1.0;
+            }
+            break;
+        case "thit":
+            if (fx.t >= 0 && fx.t < 4) state.tower_hit_flash[fx.t] = 1.0;
+            break;
+    }
+}
+
+/// @desc Floating combat number
+function game_spawn_combat_text(state, tx, ty, text, col, big = false) {
+    if (!variable_struct_exists(state, "combat_texts")) state.combat_texts = [];
+    array_push(state.combat_texts, { x: tx + random_range(-10, 10), y: ty, text: text, color: col, life: 55, max_life: 55, vy: -2.2, big: big });
+}
+
+/// @desc Screen-space anchor (center of the card) of an alien in the tactical combat view
+function game_combat_alien_anchor(state, idx) {
+    if (idx >= 0 && idx < array_length(state.combat_alien_coords)) {
+        var c = state.combat_alien_coords[idx];
+        return [c[0], c[1] - 110];
+    }
+    return [960, 260];
+}
+
+// =============================================================================
+// COMBAT SIMULATION (host / local only)
+// =============================================================================
+function game_combat_update(state) {
+    var spd_mult = state.combat_speed_2x ? 2.0 : 1.0;
+
+    // 1. Player projectiles in flight
+    for (var p = array_length(state.combat_player_projectiles) - 1; p >= 0; p--) {
+        var pp = state.combat_player_projectiles[p];
+        pp.progress += pp.speed * spd_mult;
+        if (pp.progress < 1.0) continue;
+
+        var tgt_idx = -1;
+        for (var a = 0; a < array_length(state.active_zone); a++) {
+            if (state.active_zone[a].uid == pp.target_uid) { tgt_idx = a; break; }
+        }
+        if (tgt_idx < 0 && pp.target_idx < array_length(state.active_zone)) tgt_idx = pp.target_idx;
+
+        var anc = game_combat_alien_anchor(state, tgt_idx);
+        game_fx(state, { k: "impact", x: anc[0], y: anc[1], o: "player", s: pp.catalog_id });
+        game_fx(state, { k: "shake", v: 5 });
+        game_sfx(state, "hit", 0.8);
+        if (tgt_idx >= 0) game_apply_weapon_damage(state, pp.weapon, tgt_idx);
+        array_delete(state.combat_player_projectiles, p, 1);
+
+        if (array_length(state.active_zone) == 0) {
+            game_log(state, "All active aliens eliminated! Base is secured.");
+            state.combat_subphase = "combat_concluded";
+            state.combat_concluded_reason = "aliens_eradicated";
+            state.combat_player_projectiles = [];
+            game_sfx(state, "victory", 0.6);
+            if (state.is_online) state.net_dirty = true;
+            return;
+        }
+        var all_used = true;
+        for (var i = 0; i < 4; i++) if (!state.tower_weapon_used[i]) all_used = false;
+        if (all_used && array_length(state.combat_player_projectiles) == 0) {
+            game_log(state, "All mounted weapons have completed their attacks! Alien retaliation incoming!");
+            game_start_alien_attack_phase(state);
+        }
+        if (state.is_online) state.net_dirty = true;
+    }
+
+    // 2. Alien retaliation
+    if (state.combat_subphase == "alien_attacks") {
+        for (var p = array_length(state.combat_projectiles) - 1; p >= 0; p--) {
+            var proj = state.combat_projectiles[p];
+            proj.progress += proj.speed * spd_mult;
+            if (proj.progress >= 1.0) {
+                game_apply_projectile_impact(state, proj);
+                array_delete(state.combat_projectiles, p, 1);
+            }
+        }
+        if (array_length(state.combat_projectiles) == 0) {
+            if (state.alien_attack_delay > 0) {
+                state.alien_attack_delay = max(0, state.alien_attack_delay - (state.combat_speed_2x ? 2 : 1));
+            } else if (state.phase != "game_over") {
+                var launched = game_spawn_next_alien_projectile(state);
+                if (launched) {
+                    state.alien_attack_delay = state.combat_speed_2x ? 9 : 18;
+                } else if (state.phase != "game_over") {
+                    state.combat_subphase = "combat_concluded";
+                    state.combat_concluded_reason = "retaliation_ended";
+                }
+                if (state.is_online) state.net_dirty = true;
+            }
+        }
+    }
+}
+
+/// @desc Client-side smoothing of projectiles between host snapshots (purely visual)
+function game_combat_visual_update(state) {
+    var spd_mult = state.combat_speed_2x ? 2.0 : 1.0;
+    for (var p = 0; p < array_length(state.combat_player_projectiles); p++) {
+        var pp = state.combat_player_projectiles[p];
+        pp.progress = min(0.99, pp.progress + pp.speed * spd_mult);
+    }
+    for (var p = 0; p < array_length(state.combat_projectiles); p++) {
+        var pr = state.combat_projectiles[p];
+        pr.progress = min(0.99, pr.progress + pr.speed * spd_mult);
+    }
+}
+
+/// @desc Closes a concluded combat: victory check, otherwise the next day begins
+function game_combat_conclude(state) {
+    if (state.round_number >= 17 && !state.endless_mode && array_length(state.active_zone) == 0 && array_length(state.spawn_zone) == 0) {
+        state.phase = "victory";
+        state.modal = { type: "victory" };
+        game_sfx(state, "victory");
+        return;
+    }
+    state.modal = undefined;
+    if (state.phase != "game_over") game_advance_wave_phase(state);
+}
+
+// =============================================================================
+// ACTION DISPATCH
+// Every gameplay input funnels through game_do(). Locally (and on the host) it executes
+// immediately; on an online client it becomes a request to the host.
+// =============================================================================
+function game_do(state, action, args = {}) {
+    if (state.is_online && !state.is_host) {
+        network_send_request(state, action, args);
+        game_play_sfx("click", 0.6);
+        return true;
+    }
+    return game_execute_action(state, game_local_player_idx(state), action, args);
+}
+
+/// @desc Authoritative execution of an action for operative p_idx. Returns true on success.
+/// Failure messages are kept out of the shared squad log and shown only to the acting player.
+function game_execute_action(state, p_idx, action, args) {
+    if (p_idx < 0 || p_idx >= state.num_players) return false;
+    var pl = state.players[p_idx];
+    var board_phase = (state.phase == "player_actions");
+    var combat_phase = (state.phase == "combat_weapons" || state.phase == "combat_aliens");
+    var log_before = state.log_counter;
+    var ok = false;
+
+    var board_actions = ["move", "gather", "craft_metal", "deposit", "dismantle", "buy", "reroll", "craft_bp", "repair_tower", "repair_weapon", "trade", "manual_fire", "end_turn", "begin_defense"];
+    if (array_contains(board_actions, action)) {
+        if (!board_phase) return false;
+        if (state.is_online && (pl.ended_turn || (pl[$ "disconnected"] ?? false))) {
+            game_log(state, "You have finished for today - waiting for the rest of the squad.");
+            game_action_failed(state, p_idx, log_before);
+            return false;
+        }
+    }
+
+    switch (action) {
+        case "move":
+            var node = string(args[$ "node"] ?? "");
+            if (!variable_struct_exists(state.nodes, node)) break;
+            if (game_player_can_move(state, pl, node)) {
+                ok = game_player_move(state, pl, node);
+            } else {
+                var mc = game_player_get_move_cost(pl);
+                if (!game_is_adjacent(state, pl.node, node)) game_log(state, state.nodes[$ node].name + " is not connected to your position.");
+                else game_log(state, "Moving costs " + string(mc) + " Energy - you have " + string(pl.energy) + ".");
+            }
+            break;
+        case "gather":        ok = game_player_gather(state, pl); break;
+        case "craft_metal":   ok = game_player_craft_metal(state, pl); break;
+        case "deposit":
+            if (pl.node == "main_base") { game_player_deposit(state, pl); ok = true; }
+            break;
+        case "dismantle":
+            var dti = game_player_tower_idx(pl);
+            if (dti >= 0) ok = game_player_dismantle_weapon(state, pl, dti);
+            else game_log(state, "Stand on a tower to dismantle its weapon.");
+            break;
+        case "buy":           ok = game_player_buy_blueprint(state, pl, real(args[$ "slot"] ?? -1)); break;
+        case "reroll":        ok = game_reroll_shop(state, pl, false); break;
+        case "craft_bp":      ok = game_player_craft_blueprint(state, pl, real(args[$ "bp"] ?? -1), real(args[$ "tower"] ?? 0)); break;
+        case "repair_tower":  ok = game_player_repair_tower(state, pl, clamp(real(args[$ "tower"] ?? 0), 0, 3), string(args[$ "method"] ?? "")); break;
+        case "repair_weapon": ok = game_player_repair_weapon_at_tower(state, pl, real(args[$ "tower"] ?? -1)); break;
+        case "trade":         ok = game_player_town_trade(state, pl, string(args[$ "res"] ?? ""), real(args[$ "count"] ?? 1)); break;
+        case "manual_fire":
+            var mt = real(args[$ "target"] ?? 0);
+            if (mt >= 0 && mt < array_length(state.active_zone)) ok = game_player_manual_fire(state, pl, mt);
+            else game_log(state, "No target selected.");
+            break;
+        case "end_turn":
+        case "begin_defense":
+            if (state.is_online) {
+                pl.ended_turn = true;
+                pl.energy = 0;
+                game_log(state, pl.name + " is standing by for the defense phase.");
+                game_sfx(state, "turn");
+                if (game_check_all_players_ready(state)) game_online_all_ready(state);
+            } else if (action == "end_turn") {
+                game_end_current_player_turn(state);
+            } else {
+                game_begin_defense(state);
+            }
+            ok = true;
+            break;
+
+        // ---- Tactical combat (any operative may run the guns) ----
+        case "combat_select":
+            if (combat_phase) { game_combat_select_tower(state, real(args[$ "tower"] ?? -1)); ok = true; }
+            break;
+        case "combat_fire":
+            if (state.phase == "combat_weapons" && state.combat_subphase == "player_weapons") {
+                var ft = real(args[$ "tower"] ?? -1);
+                if (ft >= 0 && ft < 4 && !state.tower_weapon_used[ft]) state.combat_selected_tower = ft;
+                ok = game_combat_fire_tower_at_alien(state, real(args[$ "target"] ?? -1));
+            }
+            break;
+        case "combat_tesla":
+            if (state.phase == "combat_weapons" && state.combat_subphase == "player_weapons") {
+                var tt = real(args[$ "tower"] ?? -1);
+                if (tt >= 0 && tt < 4) state.combat_selected_tower = tt;
+                ok = game_combat_discharge_tesla(state);
+            }
+            break;
+        case "combat_skip":
+            if (state.phase == "combat_weapons" && state.combat_subphase == "player_weapons" && array_length(state.combat_player_projectiles) == 0) {
+                game_start_alien_attack_phase(state);
+                ok = true;
+            }
+            break;
+        case "combat_conclude":
+            if (combat_phase && state.combat_subphase == "combat_concluded") { game_combat_conclude(state); ok = true; }
+            break;
+        case "combat_speed":
+            if (combat_phase) { state.combat_speed_2x = !state.combat_speed_2x; ok = true; }
+            break;
+        case "endless":
+            if (state.phase == "victory" && (!state.is_online || p_idx == 0)) {
+                state.endless_mode = true;
+                state.modal = undefined;
+                game_advance_wave_phase(state);
+                ok = true;
+            }
+            break;
+        case "chat":
+            var txt = string_copy(string_trim(string(args[$ "text"] ?? "")), 1, 80);
+            if (txt != "") {
+                game_log(state, "[CHAT] " + pl.name + ": " + txt);
+                game_sfx(state, "chat");
+                ok = true;
+            }
+            break;
+    }
+
+    if (!ok) game_action_failed(state, p_idx, log_before);
+    if (state.is_online && state.is_host) state.net_dirty = true;
+    return ok;
+}
+
+/// @desc Moves any log lines produced by a failed action out of the shared log and shows them only to the actor
+function game_action_failed(state, p_idx, log_before) {
+    var added = state.log_counter - log_before;
+    var msg = "";
+    if (added > 0 && array_length(state.action_logs) > 0) {
+        msg = state.action_logs[0];
+        array_delete(state.action_logs, 0, min(added, array_length(state.action_logs)));
+        state.log_counter = log_before;
+        state.action_log_cache_dirty = true;
+        state.toast_timer = 0;
+    }
+    if (msg == "") return;
+    if (!state.is_online || p_idx == state.net_my_player_idx) {
+        state.toast_message = msg;
+        state.toast_timer = 150;
+        state.toast_is_error = true;
+        game_play_sfx("error");
+    } else {
+        network_host_send_notice(state, p_idx, msg);
+    }
+}
+
+// =============================================================================
+// MATCH RESET (keeps settings & network session)
+// =============================================================================
+function game_reset_match(state) {
+    // Free GPU surfaces owned by the old match
+    var surf_keys = ["action_log_surf", "active_aliens_surf", "workstation_bp_surf"];
+    for (var i = 0; i < array_length(surf_keys); i++) {
+        var sf = state[$ surf_keys[i]];
+        if (!is_undefined(sf) && surface_exists(sf)) surface_free(sf);
+    }
+    if (variable_struct_exists(state, "setup_surf") && is_array(state.setup_surf)) {
+        for (var i = 0; i < array_length(state.setup_surf); i++) {
+            if (!is_undefined(state.setup_surf[i]) && surface_exists(state.setup_surf[i])) surface_free(state.setup_surf[i]);
+        }
+    }
+    var fresh = game_init_state(state.setup_player_count, state.setup_player_classes, state.setup_player_names);
+    var keep = ["settings", "resolutions", "title_stars", "screen", "modal", "is_online", "is_host",
+                "setup_player_count", "setup_player_classes", "setup_player_names", "transition"];
+    var names = variable_struct_get_names(fresh);
+    for (var i = 0; i < array_length(names); i++) {
+        var k = names[i];
+        if (array_contains(keep, k) || string_pos("net_", k) == 1) continue;
+        state[$ k] = fresh[$ k];
+    }
+}
+
+/// @desc Picks the connected node that best matches a keyboard direction (dx, dy in -1..1). Returns "" if none.
+function game_node_in_direction(state, from_key, dx, dy) {
+    if (dx == 0 && dy == 0) return "";
+    var n0 = state.nodes[$ from_key];
+    if (is_undefined(n0)) return "";
+    var want = point_direction(0, 0, dx, dy);
+    var best = "";
+    var best_diff = 61;
+    for (var i = 0; i < array_length(state.edges); i++) {
+        var e = state.edges[i];
+        var nb = "";
+        if (e[0] == from_key) nb = e[1];
+        else if (e[1] == from_key) nb = e[0];
+        if (nb == "") continue;
+        var n1 = state.nodes[$ nb];
+        var diff = abs(angle_difference(want, point_direction(n0.x, n0.y, n1.x, n1.y)));
+        if (diff < best_diff) { best_diff = diff; best = nb; }
+    }
+    return best;
+}

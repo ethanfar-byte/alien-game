@@ -4,29 +4,6 @@ function ui_point_in_rect(px, py, rx, ry, rw, rh) {
     return (px >= rx && px <= rx + rw && py >= ry && py <= ry + rh);
 }
 
-function ui_draw_button(rx, ry, rw, rh, text, enabled, is_active, mouse_px, mouse_py) {
-    var hovered = enabled && ui_point_in_rect(mouse_px, mouse_py, rx, ry, rw, rh);
-    
-    var bg_col = is_active ? make_color_rgb(41, 128, 185) : (hovered ? make_color_rgb(52, 73, 94) : make_color_rgb(44, 62, 80));
-    if (!enabled) bg_col = make_color_rgb(60, 60, 60);
-    
-    var border_col = is_active ? c_yellow : (hovered ? c_white : make_color_rgb(127, 140, 141));
-    if (!enabled) border_col = make_color_rgb(80, 80, 80);
-    
-    draw_set_color(bg_col);
-    draw_roundrect_ext(rx, ry, rx + rw, ry + rh, 10, 10, false);
-    
-    draw_set_color(border_col);
-    draw_roundrect_ext(rx, ry, rx + rw, ry + rh, 10, 10, true);
-    
-    draw_set_halign(fa_center);
-    draw_set_valign(fa_middle);
-    draw_set_color(enabled ? (hovered ? c_yellow : c_white) : make_color_rgb(140, 140, 140));
-    draw_text(rx + rw * 0.5, ry + rh * 0.5, text);
-    
-    return hovered;
-}
-
 function ui_draw_heart(hx, hy, size, color, border_color = undefined, border_width = 2) {
     if (!is_undefined(border_color)) {
         draw_set_color(border_color);
@@ -97,29 +74,11 @@ function ui_draw_lightning(bx, by, size, is_filled) {
 }
 
 function ui_draw_resource_token(tx, ty, res_type, rad = 9) {
-    var res_defs = game_get_resource_definitions();
-    var rdef = variable_struct_exists(res_defs, res_type) ? res_defs[$ res_type] : undefined;
-    if (is_undefined(rdef)) {
-        draw_set_color(make_color_rgb(180, 180, 180));
-        draw_circle(tx, ty, rad, false);
-        draw_set_color(c_white);
-        draw_circle(tx, ty, rad, true);
-        return;
-    }
-    draw_set_color(rdef.color);
-    draw_circle(tx, ty, rad, false);
-    draw_set_color(c_white);
-    draw_circle(tx, ty, rad, true);
-    draw_set_halign(fa_center); draw_set_valign(fa_middle);
-    draw_set_color(c_white);
-    draw_text(tx, ty, rdef.icon_char);
+    ui_icon_resource(tx, ty, res_type, rad * 2.2);
 }
 
 function ui_draw_die(dx, dy, dsize, value, die_color, dot_color) {
-    draw_set_color(die_color);
-    draw_roundrect_ext(dx, dy, dx + dsize, dy + dsize, 8, 8, false);
-    draw_set_color(c_black);
-    draw_roundrect_ext(dx, dy, dx + dsize, dy + dsize, 8, 8, true);
+    ui_box(dx, dy, dx + dsize, dy + dsize, die_color, c_black, 8);
     
     draw_set_color(dot_color);
     var rad = dsize * 0.1;
@@ -189,1437 +148,25 @@ function ui_draw_d20(dx, dy, dsize, value, die_color, text_color) {
     draw_text(cx, cy, string(value));
 }
 
-function ui_draw_board(state, mx, my) {
-    // Main board background (blueprint / tactical map style)
-    var bx = 20;
-    var by = 50;
-    var bw = 1480;
-    var bh = 570;
-    
-    draw_set_color(make_color_rgb(26, 32, 44));
-    draw_roundrect_ext(bx, by, bx + bw, by + bh, 16, 16, false);
-    draw_set_color(make_color_rgb(52, 73, 94));
-    draw_roundrect_ext(bx, by, bx + bw, by + bh, 16, 16, true);
-    
-    // Forest background zone
-    draw_set_color(make_color_rgb(18, 48, 28));
-    draw_roundrect_ext(30, 60, 270, 310, 14, 14, false);
-    draw_set_color(make_color_rgb(46, 125, 50));
-    draw_roundrect_ext(30, 60, 270, 310, 14, 14, true);
-    draw_set_halign(fa_left); draw_set_valign(fa_top);
-    draw_set_color(make_color_rgb(129, 199, 132));
-    draw_text(40, 70, "FOREST ZONE (Wood, Scrap)");
-    
-    // Town background zone
-    draw_set_color(make_color_rgb(50, 30, 40));
-    draw_roundrect_ext(30, 380, 270, 600, 14, 14, false);
-    draw_set_color(make_color_rgb(186, 104, 200));
-    draw_roundrect_ext(30, 380, 270, 600, 14, 14, true);
-    draw_set_color(make_color_rgb(240, 98, 146));
-    draw_text(40, 390, "TOWN (Sell & Barter)");
-    
-    // Cave background zone
-    draw_set_color(make_color_rgb(38, 28, 25));
-    draw_roundrect_ext(1160, 60, 1480, 600, 14, 14, false);
-    draw_set_color(make_color_rgb(121, 85, 72));
-    draw_roundrect_ext(1160, 60, 1480, 600, 14, 14, true);
-    draw_set_color(make_color_rgb(215, 204, 200));
-    draw_text(1180, 70, "THE CAVERNS (Stone, Metal, Gems)");
-    
-    var cur_player = state.players[state.current_player_idx];
-    
-    // Draw all connection edges
-    for (var i = 0; i < array_length(state.edges); i++) {
-        var edge = state.edges[i];
-        var n1 = state.nodes[$ edge[0]];
-        var n2 = state.nodes[$ edge[1]];
-        if (!is_undefined(n1) && !is_undefined(n2)) {
-            var is_cur_path = ((edge[0] == cur_player.node && game_player_can_move(state, cur_player, edge[1])) || 
-                               (edge[1] == cur_player.node && game_player_can_move(state, cur_player, edge[0])));
-            if (is_cur_path) {
-                // Energetic pulsating connection path to reachable node
-                draw_set_color(make_color_rgb(0, 140, 160));
-                draw_line_width(n1.x, n1.y, n2.x, n2.y, 7);
-                draw_set_color(make_color_rgb(0, 240, 210));
-                draw_line_width(n1.x, n1.y, n2.x, n2.y, 4);
-                draw_set_color(make_color_rgb(210, 255, 250));
-                draw_line_width(n1.x, n1.y, n2.x, n2.y, 2);
-                
-                // Animated traveling energy dot gliding along the connection
-                var travel_t = (current_time * 0.0012) % 1.0;
-                var p_from = (edge[0] == cur_player.node) ? n1 : n2;
-                var p_to = (edge[0] == cur_player.node) ? n2 : n1;
-                var dot_x = lerp(p_from.x, p_to.x, travel_t);
-                var dot_y = lerp(p_from.y, p_to.y, travel_t);
-                draw_set_color(c_white);
-                draw_circle(dot_x, dot_y, 4, false);
-                draw_set_color(make_color_rgb(100, 255, 240));
-                draw_circle(dot_x, dot_y, 6, true);
-            } else {
-                // Glow line
-                draw_set_color(make_color_rgb(41, 128, 185));
-                draw_line_width(n1.x, n1.y, n2.x, n2.y, 4);
-                draw_set_color(make_color_rgb(142, 202, 230));
-                draw_line_width(n1.x, n1.y, n2.x, n2.y, 2);
-            }
-        }
-    }
-    
-    // Draw base perimeter wall connecting Tower 1, 2, 3, 4
-    var t1 = state.nodes.tower_1;
-    var t2 = state.nodes.tower_2;
-    var t3 = state.nodes.tower_3;
-    var t4 = state.nodes.tower_4;
-    draw_set_color(make_color_rgb(33, 150, 243));
-    draw_line_width(t1.x, t1.y, t2.x, t2.y, 3);
-    draw_line_width(t2.x, t2.y, t3.x, t3.y, 3);
-    draw_line_width(t3.x, t3.y, t4.x, t4.y, 3);
-    draw_line_width(t4.x, t4.y, t1.x, t1.y, 3);
-    
-    // Draw all map nodes
-    var node_keys = variable_struct_get_names(state.nodes);
-    
-    for (var i = 0; i < array_length(node_keys); i++) {
-        var k = node_keys[i];
-        var node = state.nodes[$ k];
-        var is_player_here = (cur_player.node == k);
-        var can_move_here = game_player_can_move(state, cur_player, k);
-        var is_hovered = point_in_circle(mx, my, node.x, node.y, 36);
-        
-        // Node circle
-        var nrad = (node.type == "main_base" || node.type == "tower") ? 36 : 28;
-        
-        // Background
-        draw_set_color(node.color);
-        draw_circle(node.x, node.y, nrad, false);
-        
-        // Movable Space Emphasis: Pulsating neon glow rings & energy cost pill
-        if (can_move_here && !is_player_here) {
-            var pulse_anim = sin(current_time * 0.007) * 4;
-            draw_set_color(make_color_rgb(0, 255, 200));
-            draw_circle(node.x, node.y, nrad + 6 + pulse_anim, true);
-            draw_set_color(make_color_rgb(76, 217, 100));
-            draw_circle(node.x, node.y, nrad + 3 + pulse_anim * 0.5, true);
-            
-            // Movement Energy Cost Badge Pill
-            var m_cost = game_player_get_move_cost(cur_player);
-            var pill_w = 46;
-            var pill_h = 18;
-            var pill_x = node.x - pill_w * 0.5;
-            var pill_y = node.y - nrad - 22;
-            
-            draw_set_color(make_color_rgb(12, 35, 28));
-            draw_roundrect_ext(pill_x, pill_y, pill_x + pill_w, pill_y + pill_h, 6, 6, false);
-            draw_set_color(is_hovered ? c_yellow : make_color_rgb(0, 255, 180));
-            draw_roundrect_ext(pill_x, pill_y, pill_x + pill_w, pill_y + pill_h, 6, 6, true);
-            
-            draw_set_halign(fa_center); draw_set_valign(fa_middle);
-            draw_set_color(is_hovered ? c_yellow : make_color_rgb(180, 255, 220));
-            draw_text(node.x, pill_y + pill_h * 0.5, "> " + string(m_cost) + "E");
-        }
-        
-        // Border / Highlight
-        if (is_hovered) {
-            draw_set_color(c_yellow);
-            draw_circle(node.x, node.y, nrad + 4, true);
-            
-            // Set contextual tooltip
-            if (node.type == "tower") {
-                var tow = state.towers[node.tower_idx];
-                var wep_str = (is_undefined(tow.weapon) || !tow.weapon.alive) ? "No weapon mounted" : (tow.weapon.name + " (" + string(tow.weapon.hp) + "/" + string(tow.weapon.max_hp) + " HP, " + string(tow.weapon.damage) + " Dmg)");
-                if (tow.manual_cooldown > 0) {
-                    wep_str += "\n[Cooling Down: " + string(tow.manual_cooldown) + " turns left]";
-                } else if (tow.manual_powers_this_turn > 0) {
-                    wep_str += "\n[Powered: " + string(tow.manual_powers_this_turn) + "x this turn - will have " + string(tow.manual_powers_this_turn) + " turn cooldown]";
-                }
-                state.hover_tooltip = tow.name + " [Base Tower]\nHealth: " + string(tow.hp) + " / 10\nMounted Weapon: " + wep_str + "\n(Move here to manually fire mounted defense)";
-                if (is_player_here && !is_undefined(tow.weapon) && tow.weapon.alive) {
-                    state.hover_tooltip += "\n[You are here: Press [D] or click 'Dismantle' in action bar to destroy weapon & clear mount]";
-                }
-            } else if (node.type == "gather_forest") {
-                state.hover_tooltip = "Forest Gathering Zone\nCosts 1 Energy to draw from the 50-card Forest Deck (Wood, Scrap, Events).";
-            } else if (string_pos("gather_cave", node.type) > 0) {
-                state.hover_tooltip = node.name + " Gathering Zone\nCosts 1 Energy to draw from the Cavern Deck (Stone, Scrap, Metal, Crystals, Power Gems, Events).";
-            } else if (node.type == "town") {
-                var cur_fav = state.town_favors[state.active_town_favor];
-                state.hover_tooltip = "Town Market & Trading\nSell resources for Gold (Costs 1 Energy per trade).\nToday's Town Favor: " + cur_fav.name + " (" + cur_fav.desc + ")\n[Always viewable via Town Favor button or [T] key]";
-            } else if (node.type == "workstation") {
-                state.hover_tooltip = "Defense Workstation\nForge owned Blueprints into mounted defenses using resources.\nRepair damaged base towers & weapons (Workstation area only).";
-            } else if (node.type == "shop") {
-                state.hover_tooltip = "Weapon Blueprint Shop\nPurchase weapon blueprints using Gold (Forge them at Workstation).\n[Always viewable via Shop button or [S] key]";
-            } else if (node.type == "main_base") {
-                state.hover_tooltip = "Main Base Command Bunker\nCentral command room. Resources are pooled into team storage here.";
-            }
-            
-            var m_cost = game_player_get_move_cost(cur_player);
-            if (!is_player_here) {
-                if (can_move_here) {
-                    state.hover_tooltip += "\n[Connected - Click to Move (Costs " + string(m_cost) + " Energy)]";
-                } else if (game_is_adjacent(state, cur_player.node, k)) {
-                    state.hover_tooltip += "\n[Adjacent - Need " + string(m_cost) + " Energy to Move here]";
-                }
-            }
-        } else if (!can_move_here || is_player_here) {
-            draw_set_color(c_white);
-            draw_circle(node.x, node.y, nrad, true);
-        }
-        
-        // Node Type specifics
-        if (node.type == "tower") {
-            var tower = state.towers[node.tower_idx];
-            if (tower.alive) {
-                // High contrast dark badge plate for tower health
-                var th_bw = 56;
-                var th_bh = 22;
-                draw_set_color(make_color_rgb(14, 20, 32));
-                draw_roundrect_ext(node.x - th_bw * 0.5, node.y - th_bh * 0.5, node.x + th_bw * 0.5, node.y + th_bh * 0.5, 6, 6, false);
-                draw_set_color(make_color_rgb(80, 110, 150));
-                draw_roundrect_ext(node.x - th_bw * 0.5, node.y - th_bh * 0.5, node.x + th_bw * 0.5, node.y + th_bh * 0.5, 6, 6, true);
-                
-                // Tower Health: BLUE Heart Icon with a crisp WHITE border + BLUE number
-                ui_draw_heart(node.x - 14, node.y, 14, make_color_rgb(33, 150, 243), c_white, 2);
-                draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color(make_color_rgb(100, 220, 255));
-                draw_text(node.x + 1, node.y, string(tower.hp));
-                
-                // Stationed Weapon Badge on map: RED Heart Icon + RED number + Weapon Name (Dynamically sized to fit)
-                if (!is_undefined(tower.weapon) && tower.weapon.alive && tower.weapon.hp > 0) {
-                    var wep = tower.weapon;
-                    var badge_str = string(wep.hp) + " " + wep.name;
-                    var b_w = max(140, string_width(badge_str) + 36);
-                    var b_h = 24;
-                    var bx0 = node.x - b_w * 0.5;
-                    var by0 = node.y - nrad - 26;
-                    
-                    draw_set_color(make_color_rgb(28, 20, 25));
-                    draw_roundrect_ext(bx0, by0, bx0 + b_w, by0 + b_h, 6, 6, false);
-                    draw_set_color(make_color_rgb(231, 76, 60));
-                    draw_roundrect_ext(bx0, by0, bx0 + b_w, by0 + b_h, 6, 6, true);
-                    
-                    // Red Heart Icon
-                    ui_draw_heart(bx0 + 12, by0 + 12, 12, make_color_rgb(231, 76, 60));
-                    
-                    // Weapon HP & Name in Red
-                    draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                    draw_set_color(make_color_rgb(255, 120, 120));
-                    draw_text(bx0 + 24, by0 + 12, badge_str);
-                }
-            } else {
-                draw_set_color(c_red);
-                draw_line_width(node.x - 15, node.y - 15, node.x + 15, node.y + 15, 3);
-                draw_line_width(node.x - 15, node.y + 15, node.x + 15, node.y - 15, 3);
-            }
-        }
-        
-        // Label
-        draw_set_halign(fa_center); draw_set_valign(fa_top);
-        draw_set_color(c_white);
-        draw_text(node.x, node.y + nrad + 6, node.label);
-    }
-    
-    // Draw Board Action Shockwaves & Particles
-    if (variable_struct_exists(state, "board_action_effects") && is_array(state.board_action_effects)) {
-        for (var b = 0; b < array_length(state.board_action_effects); b++) {
-            var ba = state.board_action_effects[b];
-            var prog = ba.life / max(1, ba.max_life);
-            var cur_r = prog * ba.max_radius;
-            var cur_a = clamp((1.0 - prog) * 0.9, 0.0, 1.0);
-            
-            draw_set_alpha(cur_a);
-            draw_set_color(ba.color);
-            draw_circle(ba.x, ba.y, cur_r, true);
-            if (cur_r > 6) {
-                draw_circle(ba.x, ba.y, cur_r - 2, true);
-            }
-            
-            // Particles
-            for (var p = 0; p < array_length(ba.particles); p++) {
-                var pt = ba.particles[p];
-                var pt_a = clamp(pt.life / max(1, pt.max_life), 0.0, 1.0);
-                draw_set_alpha(pt_a);
-                draw_set_color(pt.color);
-                if (pt.shape == "cross") {
-                    draw_line_width(pt.x - pt.size, pt.y, pt.x + pt.size, pt.y, 2);
-                    draw_line_width(pt.x, pt.y - pt.size, pt.x, pt.y + pt.size, 2);
-                } else {
-                    draw_circle(pt.x, pt.y, pt.size, false);
-                }
-            }
-        }
-        draw_set_alpha(1.0);
-    }
-    
-    // Draw Player Pawns on nodes with animated gliding movement & action animations
-    for (var p = 0; p < state.num_players; p++) {
-        var pl = state.players[p];
-        var pnode = state.nodes[$ pl.node];
-        if (!is_undefined(pnode)) {
-            var ox = (p - 1.5) * 16;
-            var oy = (p % 2 == 0 ? -12 : 12);
-            
-            var px = variable_struct_exists(pl, "anim_x") ? pl.anim_x : (pnode.x + ox);
-            var py = variable_struct_exists(pl, "anim_y") ? pl.anim_y : (pnode.y + oy);
-            var hop = variable_struct_exists(pl, "hop_y") ? pl.hop_y : 0;
-            
-            // Action animation offsets and feedback
-            var act_x = 0;
-            var act_y = 0;
-            if (variable_struct_exists(pl, "action_timer") && pl.action_timer > 0) {
-                var anim = pl.action_anim;
-                if (anim == "gather_forest" || anim == "gather_cave") {
-                    act_y = -abs(sin(pl.action_timer * 0.45) * 10);
-                    act_x = sin(pl.action_timer * 0.9) * 3;
-                } else if (anim == "craft" || anim == "forge") {
-                    act_x = ((pl.action_timer % 4) < 2) ? 4 : -4;
-                    act_y = ((pl.action_timer % 4) < 2) ? -2 : 3;
-                } else if (anim == "deposit" || anim == "trade") {
-                    act_y = -abs(sin(pl.action_timer * 0.35) * 14);
-                } else if (anim == "dismantle") {
-                    act_x = sin(pl.action_timer * 0.8) * 6;
-                } else if (anim == "repair") {
-                    act_y = sin(pl.action_timer * 0.6) * 4;
-                    act_x = cos(pl.action_timer * 0.6) * 4;
-                } else if (anim == "fire") {
-                    act_y = 6 * (pl.action_timer / max(1, pl.action_max));
-                }
-                
-                // Pulsating action ring aura
-                draw_set_color(make_color_rgb(255, 235, 59));
-                draw_circle(px, py + hop, 18 + sin(current_time * 0.02) * 3, true);
-            }
-            
-            // Ground drop shadow (scales with hop)
-            var shadow_scale = clamp(1.0 - (-hop / 30.0), 0.35, 1.0);
-            draw_set_alpha(0.45 * shadow_scale);
-            draw_set_color(c_black);
-            draw_ellipse(px - 11 * shadow_scale, py + 9 - 4 * shadow_scale, px + 11 * shadow_scale, py + 9 + 4 * shadow_scale, false);
-            draw_set_alpha(1.0);
-            
-            var draw_pawn_x = px + act_x;
-            var draw_pawn_y = py + hop + act_y;
-            
-            // Draw Pawn Body
-            draw_set_color(c_black);
-            draw_circle(draw_pawn_x, draw_pawn_y, 14, false);
-            draw_set_color(pl.color);
-            draw_circle(draw_pawn_x, draw_pawn_y, 12, false);
-            draw_set_color(c_white);
-            draw_circle(draw_pawn_x, draw_pawn_y, 12, true);
-            
-            // Active operative ring and floating indicator chevron
-            if (p == state.current_player_idx) {
-                var act_pulse = sin(current_time * 0.008) * 3;
-                draw_set_color(c_yellow);
-                draw_circle(draw_pawn_x, draw_pawn_y, 15 + act_pulse, true);
-                
-                // Pointer chevron ▼ pointing to active operative
-                var ind_y = draw_pawn_y - 20 - abs(sin(current_time * 0.008) * 5);
-                draw_set_color(c_yellow);
-                draw_triangle(draw_pawn_x - 5, ind_y - 6, draw_pawn_x + 5, ind_y - 6, draw_pawn_x, ind_y, false);
-                draw_set_color(c_black);
-                draw_triangle(draw_pawn_x - 5, ind_y - 6, draw_pawn_x + 5, ind_y - 6, draw_pawn_x, ind_y, true);
-            }
-            
-            draw_set_halign(fa_center); draw_set_valign(fa_middle);
-            draw_set_color(c_white);
-            draw_text(draw_pawn_x, draw_pawn_y, string(p + 1));
-        }
-    }
-    
-    // Draw Floating Text Labels on the board
-    if (variable_struct_exists(state, "floating_texts") && is_array(state.floating_texts)) {
-        for (var f = 0; f < array_length(state.floating_texts); f++) {
-            var ft = state.floating_texts[f];
-            draw_set_alpha(ft.alpha);
-            draw_set_halign(fa_center); draw_set_valign(fa_middle);
-            
-            // Drop shadow
-            draw_set_color(c_black);
-            draw_text(ft.x + 1, ft.y + 1, ft.text);
-            draw_text(ft.x - 1, ft.y - 1, ft.text);
-            draw_text(ft.x + 1, ft.y - 1, ft.text);
-            draw_text(ft.x - 1, ft.y + 1, ft.text);
-            
-            // Foreground text
-            draw_set_color(ft.color);
-            draw_text(ft.x, ft.y, ft.text);
-        }
-        draw_set_alpha(1.0);
-    }
-}
-
-function ui_draw_colored_log_entry(draw_x, draw_y, l, log_count, log_str, do_draw = true) {
-    // 1. Determine Category & Importance
-    var cat_tag = "INFO";
-    var cat_col = make_color_rgb(120, 135, 155);
-    var cat_bg = make_color_rgb(25, 32, 44);
-    var is_important = false;
-    var default_text_col = make_color_rgb(140, 155, 175); // Basic text color (muted cool slate)
-    
-    if (string_pos("[CHAT]", log_str) == 1) {
-        cat_tag = "CHAT";
-        cat_col = make_color_rgb(0, 229, 255);
-        cat_bg = make_color_rgb(10, 42, 62);
-        is_important = true;
-        default_text_col = make_color_rgb(180, 245, 255);
-    }
-    else if (string_pos("DESTROYED", log_str) > 0 || string_pos("CRITICAL", log_str) > 0 || string_pos("FAILED", log_str) > 0 || string_pos("Humanity has fallen", log_str) > 0) {
-        cat_tag = "CRIT";
-        cat_col = make_color_rgb(255, 75, 75);
-        cat_bg = make_color_rgb(60, 15, 15);
-        is_important = true;
-        default_text_col = make_color_rgb(255, 210, 210);
-    }
-    else if (string_pos("VICTORY", log_str) > 0 || string_pos("WAVE", log_str) > 0 || string_pos("Wave", log_str) > 0 || string_pos("Round", log_str) > 0 || string_pos("PHASE", log_str) > 0 || string_pos("A new day begins", log_str) > 0) {
-        cat_tag = "WAVE";
-        cat_col = make_color_rgb(255, 215, 0);
-        cat_bg = make_color_rgb(50, 42, 10);
-        is_important = true;
-        default_text_col = make_color_rgb(255, 245, 190);
-    }
-    else if (string_pos("incinerated", log_str) > 0 || string_pos("obliterated", log_str) > 0 || string_pos("fired at", log_str) > 0 || string_pos("fired", log_str) > 0 || string_pos("discharges", log_str) > 0 || string_pos("splash", log_str) > 0 || string_pos("overcharged", log_str) > 0) {
-        cat_tag = "DEFENSE";
-        cat_col = make_color_rgb(255, 160, 60);
-        cat_bg = make_color_rgb(55, 30, 10);
-        is_important = true;
-        default_text_col = make_color_rgb(255, 245, 225);
-    }
-    else if (string_pos("struck", log_str) > 0 || string_pos("deals", log_str) > 0 || string_pos("carpet bombs", log_str) > 0 || string_pos("drained", log_str) > 0 || string_pos("disabled", log_str) > 0 || string_pos("spawned", log_str) > 0 || string_pos("summoned", log_str) > 0 || string_pos("FROZEN", log_str) > 0 || string_pos("INCOMING", log_str) > 0) {
-        cat_tag = "ALIEN";
-        cat_col = make_color_rgb(225, 115, 235);
-        cat_bg = make_color_rgb(50, 18, 55);
-        is_important = true;
-        default_text_col = make_color_rgb(245, 225, 255);
-    }
-    else if (string_pos("tanked", log_str) > 0 || string_pos("absorbed", log_str) > 0 || string_pos("OVERLOAD", log_str) > 0) {
-        cat_tag = "SHIELD";
-        cat_col = make_color_rgb(64, 196, 255);
-        cat_bg = make_color_rgb(15, 40, 60);
-        is_important = true;
-        default_text_col = make_color_rgb(220, 245, 255);
-    }
-    else if (string_pos("repaired", log_str) > 0 || string_pos("Healed", log_str) > 0 || string_pos("healed", log_str) > 0) {
-        cat_tag = "REPAIR";
-        cat_col = make_color_rgb(105, 240, 174);
-        cat_bg = make_color_rgb(15, 48, 28);
-        is_important = true;
-        default_text_col = make_color_rgb(225, 255, 235);
-    }
-    else if (string_pos("Perk", log_str) > 0 || string_pos("Immune", log_str) > 0) {
-        cat_tag = "PERK";
-        cat_col = make_color_rgb(76, 217, 100);
-        cat_bg = make_color_rgb(15, 45, 20);
-        is_important = true;
-        default_text_col = make_color_rgb(230, 255, 235);
-    }
-    else if (string_pos("sold", log_str) > 0 || string_pos("Favor", log_str) > 0 || string_pos("reroll", log_str) > 0) {
-        cat_tag = "TRADE";
-        cat_col = make_color_rgb(255, 215, 0);
-        cat_bg = make_color_rgb(45, 38, 12);
-        is_important = false;
-        default_text_col = make_color_rgb(240, 230, 200);
-    }
-    else if (string_pos("crafted", log_str) > 0 || string_pos("forged", log_str) > 0 || string_pos("stationed", log_str) > 0) {
-        cat_tag = "CRAFT";
-        cat_col = make_color_rgb(100, 210, 255);
-        cat_bg = make_color_rgb(18, 42, 58);
-        is_important = false;
-        default_text_col = make_color_rgb(215, 235, 250);
-    }
-    else if (string_pos("drew", log_str) > 0 || string_pos("deposited", log_str) > 0 || string_pos("retrieved", log_str) > 0) {
-        cat_tag = "LOOT";
-        cat_col = make_color_rgb(129, 199, 132);
-        cat_bg = make_color_rgb(18, 44, 25);
-        is_important = false;
-        default_text_col = make_color_rgb(215, 240, 220);
-    }
-    else if (string_pos("moved to", log_str) > 0) {
-        cat_tag = "MOVE";
-        cat_col = make_color_rgb(100, 149, 237);
-        cat_bg = make_color_rgb(20, 30, 50);
-        is_important = false;
-        default_text_col = make_color_rgb(140, 155, 175);
-    }
-    else if (string_pos("Switched to", log_str) > 0 || string_pos("Energy", log_str) > 0) {
-        cat_tag = "TURN";
-        cat_col = make_color_rgb(140, 160, 185);
-        cat_bg = make_color_rgb(25, 32, 42);
-        is_important = false;
-        default_text_col = make_color_rgb(140, 155, 175);
-    }
-
-    var cur_x = draw_x;
-
-    // 2. Draw Index Number Badge [#42]
-    var idx_str = "[" + string(log_count - l) + "] ";
-    var idx_w = string_width(idx_str);
-    if (do_draw) {
-        draw_set_halign(fa_left); draw_set_valign(fa_top);
-        draw_set_color(is_important ? make_color_rgb(140, 160, 190) : make_color_rgb(85, 100, 120));
-        draw_text(cur_x, draw_y + 3, idx_str);
-    }
-    cur_x += idx_w;
-
-    // 3. Draw Category Badge Pill
-    var tag_pad_x = 4;
-    var tag_text_w = string_width(cat_tag);
-    var tag_total_w = tag_text_w + tag_pad_x * 2;
-    if (do_draw) {
-        draw_set_color(cat_bg);
-        draw_roundrect_ext(cur_x, draw_y + 3, cur_x + tag_total_w, draw_y + 19, 4, 4, false);
-        draw_set_color(cat_col);
-        draw_roundrect_ext(cur_x, draw_y + 3, cur_x + tag_total_w, draw_y + 19, 4, 4, true);
-        draw_set_halign(fa_center); draw_set_valign(fa_middle);
-        draw_text(cur_x + tag_total_w * 0.5, draw_y + 11, cat_tag);
-    }
-    cur_x += tag_total_w + 6;
-
-    // 4. Tokenize and Draw Words with Custom Thematic Colors
-    draw_set_halign(fa_left); draw_set_valign(fa_top);
-    var words = string_split(log_str, " ");
-    var space_w = string_width(" ");
-    var num_words = array_length(words);
-
-    for (var w = 0; w < num_words; w++) {
-        var word = words[w];
-        if (word == "") continue;
-        
-        var clean = string_lower(string_lettersdigits(word));
-        var next_clean = (w < num_words - 1) ? string_lower(string_lettersdigits(words[w + 1])) : "";
-        var w_col = default_text_col;
-
-        // Check contextual modifiers and prefixes:
-        // Prefixes (+ / -)
-        if (string_pos("+", word) > 0 || clean == "bonus") {
-            w_col = make_color_rgb(105, 240, 174); // Green for positive bonus/gain
-        } else if (string_pos("-", word) > 0 && string_length(clean) > 0 && (clean == "1" || clean == "2" || clean == "3" || clean == "4")) {
-            w_col = make_color_rgb(255, 90, 80); // Red for penalty/loss
-        }
-        // Resources (Word itself or number directly before resource)
-        else if (clean == "wood" || clean == "lumber" || next_clean == "wood" || next_clean == "lumber") {
-            w_col = make_color_rgb(205, 140, 85); // Wood brown/amber
-        } else if (clean == "stone" || next_clean == "stone") {
-            w_col = make_color_rgb(180, 190, 200); // Stone grey
-        } else if (clean == "scrap" || clean == "scraps" || next_clean == "scrap" || next_clean == "scraps") {
-            w_col = make_color_rgb(215, 145, 95); // Scrap rusty copper
-        } else if (clean == "metal" || next_clean == "metal") {
-            w_col = make_color_rgb(225, 235, 245); // Metal silver
-        } else if (clean == "crystal" || clean == "crystals" || next_clean == "crystals" || next_clean == "crystal") {
-            w_col = make_color_rgb(0, 229, 255); // Cyan crystal
-        } else if (clean == "power" || clean == "gem" || clean == "gems" || next_clean == "gem" || next_clean == "gems") {
-            w_col = make_color_rgb(224, 64, 251); // Power gem magenta
-        } else if (clean == "gold" || string_pos("gold", clean) > 0 || next_clean == "gold" || clean == "favor") {
-            w_col = make_color_rgb(255, 215, 0); // Coin gold
-        }
-        // Combat stats & Numbers (Word itself or number directly before damage/hp/energy)
-        else if (clean == "damage" || clean == "dmg" || string_pos("dmg", clean) > 0 || next_clean == "damage" || next_clean == "dmg" || clean == "incinerated" || clean == "obliterated" || clean == "struck") {
-            w_col = make_color_rgb(255, 100, 60); // Fiery attack/damage red-orange
-        } else if (clean == "hp" || string_pos("hp", clean) > 0 || next_clean == "hp" || clean == "healed" || clean == "repaired") {
-            w_col = make_color_rgb(105, 240, 174); // Health green
-        } else if (clean == "energy" || clean == "overcharged" || next_clean == "energy") {
-            w_col = make_color_rgb(255, 235, 59); // Energy yellow
-        }
-        // Aliens & Bosses
-        else if (clean == "alien" || clean == "aliens" || clean == "queen" || clean == "drooper" || clean == "leech" || clean == "syphon" || clean == "hatcher" || clean == "hatchling" || clean == "hatchlings" || clean == "spitter" || clean == "stalker" || clean == "weaver") {
-            w_col = make_color_rgb(225, 115, 235); // Alien violet
-        } else if (clean == "emp" || clean == "frozen" || clean == "thawed") {
-            w_col = make_color_rgb(80, 220, 255); // EMP/Ice blue
-        }
-        // Weapons & Defenses
-        else if (clean == "turret" || clean == "flamethrower" || clean == "railgun" || clean == "tesla" || clean == "mortar" || clean == "pylon" || clean == "shield" || clean == "generator" || clean == "drone") {
-            w_col = make_color_rgb(255, 183, 77); // Tech weapon amber
-        } else if (clean == "tower" || clean == "towers" || clean == "base") {
-            w_col = make_color_rgb(80, 175, 255); // Tower blue
-        }
-        // Critical alerts
-        else if (clean == "destroyed" || clean == "critical" || clean == "failed" || clean == "alert") {
-            w_col = make_color_rgb(255, 60, 60); // Alarm scarlet
-        }
-        // Players
-        else if (clean == "player" || clean == "survivor" || clean == "scout" || clean == "engineer" || clean == "miner" || clean == "gunner" || clean == "pathfinder") {
-            w_col = make_color_rgb(130, 220, 255); // Operative sky-blue
-        }
-        // Perks & Victory
-        else if (clean == "perk" || clean == "immune" || clean == "victory") {
-            w_col = make_color_rgb(105, 240, 174); // Perk green / gold
-        }
-
-        if (do_draw) {
-            draw_set_color(w_col);
-            draw_text(cur_x, draw_y + 3, word);
-        }
-        cur_x += string_width(word) + space_w;
-    }
-
-    return cur_x - draw_x;
-}
-
-function ui_draw_right_panel(state, mx, my) {
-    var rx = 1520;
-    var ry = 50;
-    var rw = 380;
-    
-    // -------------------------------------------------------------
-    // TOP SECTION: WAVE INFO, TOWERS & WEAPON STATUS
-    // -------------------------------------------------------------
-    var top_box_h = 300;
-    draw_set_color(make_color_rgb(26, 32, 44));
-    draw_roundrect_ext(rx, ry, rx + rw, ry + top_box_h, 14, 14, false);
-    draw_set_color(make_color_rgb(52, 73, 94));
-    draw_roundrect_ext(rx, ry, rx + rw, ry + top_box_h, 14, 14, true);
-    
-    // Round info header
-    draw_set_halign(fa_left); draw_set_valign(fa_top);
-    draw_set_color(c_yellow);
-    var wave_text = (state.round_number <= 17) ? ("WAVE " + string(state.round_number) + " / 17") : ("ENDLESS WAVE " + string(state.round_number));
-    draw_text(rx + 16, ry + 10, wave_text);
-    
-    draw_set_color(c_white);
-    var phase_str = "Phase: ";
-    if (state.phase == "player_actions") phase_str += "Player Action Turn";
-    else if (state.phase == "combat_weapons") phase_str += "Weapons Defending";
-    else if (state.phase == "combat_aliens") phase_str += "Alien Assault";
-    draw_text(rx + 16, ry + 30, phase_str);
-    
-    // -------------------------------------------------------------
-    // BASE TOWERS (TOWER HP: BLUE)
-    // -------------------------------------------------------------
-    draw_set_color(make_color_rgb(100, 180, 255));
-    draw_text(rx + 16, ry + 52, "-- BASE TOWERS (TOWER HP: BLUE) --");
-    
-    for (var t = 0; t < 4; t++) {
-        var tow = state.towers[t];
-        var ty = ry + 72 + t * 24;
-        
-        // Tower label
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(tow.alive ? c_white : c_red);
-        draw_text(rx + 16, ty + 9, "T" + string(t + 1) + ":");
-        
-        // Blue Heart Icon for Tower Health
-        ui_draw_heart(rx + 58, ty + 9, 13, tow.alive ? make_color_rgb(33, 150, 243) : make_color_rgb(90, 90, 90));
-        
-        // Bar
-        var bx = rx + 75;
-        var bw = rw - 95;
-        var bh = 17;
-        draw_set_color(make_color_rgb(30, 36, 48));
-        draw_roundrect_ext(bx, ty, bx + bw, ty + bh, 4, 4, false);
-        
-        if (tow.alive && tow.hp > 0) {
-            var fill_w = (tow.hp / tow.max_hp) * bw;
-            draw_set_color(make_color_rgb(33, 150, 243));
-            draw_roundrect_ext(bx, ty, bx + fill_w, ty + bh, 4, 4, false);
-        }
-        draw_set_color(tow.alive ? make_color_rgb(80, 140, 200) : make_color_rgb(100, 60, 60));
-        draw_roundrect_ext(bx, ty, bx + bw, ty + bh, 4, 4, true);
-        
-        draw_set_halign(fa_center); draw_set_valign(fa_middle);
-        draw_set_color(tow.alive ? make_color_rgb(220, 240, 255) : c_red);
-        draw_text(bx + bw * 0.5, ty + 9, tow.alive ? (string(tow.hp) + " / 10 HP") : "DESTROYED");
-    }
-    
-    // -------------------------------------------------------------
-    // TOWER WEAPON MOUNTS (WEAPON HP: RED)
-    // -------------------------------------------------------------
-    draw_set_halign(fa_left); draw_set_valign(fa_top);
-    draw_set_color(make_color_rgb(255, 138, 128));
-    draw_text(rx + 16, ry + 172, "-- WEAPON DEFENSES (WEAPON HP: RED) --");
-    
-    for (var t = 0; t < 4; t++) {
-        var tow = state.towers[t];
-        var wy = ry + 192 + t * 24;
-        
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(c_white);
-        draw_text(rx + 16, wy + 9, "T" + string(t + 1) + ":");
-        
-        if (!tow.alive) {
-            draw_set_color(make_color_rgb(160, 80, 80));
-            draw_text(rx + 52, wy + 9, "[Tower Destroyed]");
-        } else if (is_undefined(tow.weapon) || !tow.weapon.alive) {
-            draw_set_color(make_color_rgb(120, 130, 140));
-            draw_text(rx + 52, wy + 9, "[No Weapon Mounted]");
-        } else {
-            var wep = tow.weapon;
-            // Red Heart Icon for Weapon Health
-            ui_draw_heart(rx + 58, wy + 9, 13, make_color_rgb(231, 76, 60));
-            
-            // Weapon HP in Red
-            draw_set_color(make_color_rgb(255, 110, 110));
-            var hp_str = string(wep.hp) + "/" + string(wep.max_hp);
-            draw_text(rx + 72, wy + 9, hp_str);
-            
-            // Weapon Name and Damage in White/Yellow
-            draw_set_color(c_white);
-            var wep_tag = wep.name + " (" + string(wep.damage) + "d)";
-            if (tow.manual_cooldown > 0) wep_tag += " [CD:" + string(tow.manual_cooldown) + "]";
-            else if (tow.manual_powers_this_turn > 0) wep_tag += " [Pwr:" + string(tow.manual_powers_this_turn) + "]";
-            if (wep.disabled) wep_tag += " [EMP]";
-            if (string_length(wep_tag) > 25) wep_tag = string_copy(wep_tag, 1, 23) + "..";
-            draw_text(rx + 132, wy + 9, wep_tag);
-        }
-    }
-    
-    // -------------------------------------------------------------
-    // BOTTOM SECTION: ACTION & COMBAT LOGS (DRAGGABLE & 2D SCROLLABLE)
-    // -------------------------------------------------------------
-    var log_x = variable_struct_exists(state, "action_log_x") ? state.action_log_x : 1520;
-    log_x = clamp(log_x, 250, 1520);
-    state.action_log_x = log_x;
-    
-    var log_y = 362;
-    var log_y2 = 622;
-    var log_w = 1900 - log_x;
-    var log_h = log_y2 - log_y;
-    
-    // Container background (opaque to cover the map when expanded to the left)
-    draw_set_color(make_color_rgb(22, 28, 38));
-    draw_roundrect_ext(log_x, log_y, 1900, log_y2, 12, 12, false);
-    draw_set_color(make_color_rgb(52, 73, 94));
-    draw_roundrect_ext(log_x, log_y, 1900, log_y2, 12, 12, true);
-    
-    // Left border drag handle
-    var handle_hov = point_in_rectangle(mx, my, log_x - 8, log_y, log_x + 8, log_y2);
-    state.action_log_resizer_hover = handle_hov;
-    
-    var handle_col = (state.action_log_dragging || handle_hov) ? make_color_rgb(0, 229, 255) : make_color_rgb(60, 85, 115);
-    draw_set_color(handle_col);
-    draw_line_width(log_x, log_y, log_x, log_y2, (state.action_log_dragging || handle_hov) ? 3 : 2);
-    
-    // Handle grip tab pill
-    var grip_y = log_y + log_h * 0.5;
-    draw_set_color(make_color_rgb(18, 24, 34));
-    draw_roundrect_ext(log_x - 7, grip_y - 20, log_x + 7, grip_y + 20, 6, 6, false);
-    draw_set_color(handle_col);
-    draw_roundrect_ext(log_x - 7, grip_y - 20, log_x + 7, grip_y + 20, 6, 6, true);
-    
-    draw_set_color((state.action_log_dragging || handle_hov) ? c_white : make_color_rgb(140, 165, 195));
-    draw_line_width(log_x - 2, grip_y - 10, log_x - 2, grip_y + 10, 1);
-    draw_line_width(log_x + 2, grip_y - 10, log_x + 2, grip_y + 10, 1);
-    
-    // Header text (no buttons here so text is never overlapped)
-    draw_set_halign(fa_left); draw_set_valign(fa_middle);
-    draw_set_color(make_color_rgb(180, 215, 255));
-    var log_count = array_length(state.action_logs);
-    draw_text(log_x + 14, log_y + 14, "-- ACTION & COMBAT LOGS -- (" + string(log_count) + ")");
-    
-    // Inner Log View Box
-    var box_x = log_x + 12;
-    var box_y = log_y + 28;
-    var box_w = (1900 - 12) - box_x;
-    var box_h = (log_y2 - 68) - box_y;
-    
-    draw_set_color(make_color_rgb(15, 19, 27));
-    draw_roundrect_ext(box_x, box_y, box_x + box_w, box_y + box_h, 8, 8, false);
-    draw_set_color(make_color_rgb(42, 54, 74));
-    draw_roundrect_ext(box_x, box_y, box_x + box_w, box_y + box_h, 8, 8, true);
-    
-    // Viewport dimensions for scrolling & clipping
-    var view_x = box_x + 4;
-    var view_y = box_y + 4;
-    var view_w = max(10, box_w - 18);
-    var view_h = max(10, box_h - 18);
-    
-    var line_h = 24;
-    var total_h = log_count * line_h;
-    
-    var max_text_w = view_w;
-    for (var i = 0; i < log_count; i++) {
-        var ew = ui_draw_colored_log_entry(0, 0, i, log_count, state.action_logs[i], false);
-        if (ew > max_text_w) max_text_w = ew;
-    }
-    
-    var max_scroll_y = max(0, total_h - view_h);
-    var max_scroll_x = max(0, max_text_w + 30 - view_w);
-    state.action_log_max_scroll_y = max_scroll_y;
-    state.action_log_max_scroll_x = max_scroll_x;
-    state.action_log_scroll_y = clamp(state.action_log_scroll_y, 0, max_scroll_y);
-    state.action_log_scroll_x = clamp(state.action_log_scroll_x, 0, max_scroll_x);
-    
-    var surf_w = max(1, floor(view_w));
-    var surf_h = max(1, floor(view_h));
-    
-    if (!variable_struct_exists(state, "action_log_surf") || is_undefined(state.action_log_surf) || !surface_exists(state.action_log_surf)) {
-        state.action_log_surf = surface_create(surf_w, surf_h);
-    } else if (surface_get_width(state.action_log_surf) != surf_w || surface_get_height(state.action_log_surf) != surf_h) {
-        surface_free(state.action_log_surf);
-        state.action_log_surf = surface_create(surf_w, surf_h);
-    }
-    
-    surface_set_target(state.action_log_surf);
-    draw_clear_alpha(c_black, 0);
-    draw_set_valign(fa_top);
-    
-    var start_line = max(0, floor(state.action_log_scroll_y / line_h));
-    var end_line = min(log_count - 1, ceil((state.action_log_scroll_y + view_h) / line_h));
-    
-    for (var l = start_line; l <= end_line; l++) {
-        var ly = (l * line_h) - state.action_log_scroll_y;
-        var lx = 6 - state.action_log_scroll_x;
-        ui_draw_colored_log_entry(lx, ly, l, log_count, state.action_logs[l], true);
-    }
-    
-    surface_reset_target();
-    draw_surface(state.action_log_surf, view_x, view_y);
-    
-    // Vertical Scrollbar
-    var v_track_x = box_x + box_w - 12;
-    var v_track_y = box_y + 4;
-    var v_track_w = 8;
-    var v_track_h = view_h;
-    
-    draw_set_color(make_color_rgb(24, 30, 42));
-    draw_roundrect_ext(v_track_x, v_track_y, v_track_x + v_track_w, v_track_y + v_track_h, 4, 4, false);
-    
-    if (total_h > view_h) {
-        var thumb_h = max(22, (view_h / total_h) * v_track_h);
-        var thumb_y = v_track_y + (state.action_log_scroll_y / max_scroll_y) * (v_track_h - thumb_h);
-        var thumb_hov = point_in_rectangle(mx, my, v_track_x - 3, thumb_y, v_track_x + v_track_w + 3, thumb_y + thumb_h);
-        state.action_log_v_thumb_hover = thumb_hov;
-        state.action_log_usable_v_track = max(1, v_track_h - thumb_h);
-        
-        var thumb_col = (state.action_log_v_drag || thumb_hov) ? make_color_rgb(100, 160, 230) : make_color_rgb(60, 80, 110);
-        draw_set_color(thumb_col);
-        draw_roundrect_ext(v_track_x, thumb_y, v_track_x + v_track_w, thumb_y + thumb_h, 4, 4, false);
-    } else {
-        state.action_log_v_thumb_hover = false;
-        state.action_log_usable_v_track = 1;
-    }
-    
-    // Horizontal Scrollbar
-    var h_track_x = box_x + 4;
-    var h_track_y = box_y + box_h - 12;
-    var h_track_w = view_w;
-    var h_track_h = 8;
-    
-    draw_set_color(make_color_rgb(24, 30, 42));
-    draw_roundrect_ext(h_track_x, h_track_y, h_track_x + h_track_w, h_track_y + h_track_h, 4, 4, false);
-    
-    if (max_text_w + 30 > view_w) {
-        var thumb_w = max(24, (view_w / (max_text_w + 30)) * h_track_w);
-        var thumb_x = h_track_x + (state.action_log_scroll_x / max_scroll_x) * (h_track_w - thumb_w);
-        var thumb_hov = point_in_rectangle(mx, my, thumb_x, h_track_y - 3, thumb_x + thumb_w, h_track_y + h_track_h + 3);
-        state.action_log_h_thumb_hover = thumb_hov;
-        state.action_log_usable_h_track = max(1, h_track_w - thumb_w);
-        
-        var thumb_col = (state.action_log_h_drag || thumb_hov) ? make_color_rgb(100, 160, 230) : make_color_rgb(60, 80, 110);
-        draw_set_color(thumb_col);
-        draw_roundrect_ext(thumb_x, h_track_y, thumb_x + thumb_w, h_track_y + h_track_h, 4, 4, false);
-    } else {
-        state.action_log_h_thumb_hover = false;
-        state.action_log_usable_h_track = 1;
-    }
-    
-    // -------------------------------------------------------------
-    // LIVE CHAT INPUT BAR: Send messages to team / Wi-Fi lobby
-    // -------------------------------------------------------------
-    var chat_y = log_y2 - 62;
-    var chat_h = 26;
-    var chat_total_w = (1900 - 12) - (log_x + 12);
-    var send_w = 64;
-    var inp_w = chat_total_w - send_w - 6;
-    var inp_x = log_x + 12;
-    var send_x = inp_x + inp_w + 6;
-    
-    var is_chat_active = (variable_struct_exists(state, "chat_input_active") && state.chat_input_active);
-    var chat_hov = ui_point_in_rect(mx, my, inp_x, chat_y, inp_w, chat_h);
-    state.chat_input_hover = chat_hov;
-    
-    draw_set_color(is_chat_active ? make_color_rgb(18, 30, 48) : (chat_hov ? make_color_rgb(16, 24, 36) : make_color_rgb(12, 16, 24)));
-    draw_roundrect_ext(inp_x, chat_y, inp_x + inp_w, chat_y + chat_h, 6, 6, false);
-    draw_set_color(is_chat_active ? make_color_rgb(0, 229, 255) : (chat_hov ? c_white : make_color_rgb(45, 65, 95)));
-    draw_roundrect_ext(inp_x, chat_y, inp_x + inp_w, chat_y + chat_h, 6, 6, true);
-    
-    draw_set_halign(fa_left); draw_set_valign(fa_middle);
-    var disp_chat = variable_struct_exists(state, "chat_input_text") ? state.chat_input_text : "";
-    if (is_chat_active) {
-        if ((state.chat_cursor_timer div 25) % 2 == 0) disp_chat += "|";
-        draw_set_color(c_white);
-        draw_text(inp_x + 8, chat_y + chat_h * 0.5, disp_chat);
-    } else {
-        draw_set_color(make_color_rgb(110, 135, 165));
-        var placeholder = (disp_chat != "") ? disp_chat : "Chat to squad... [Click or press T]";
-        draw_text(inp_x + 8, chat_y + chat_h * 0.5, placeholder);
-    }
-    
-    // Send Button
-    state.chat_send_hover = ui_draw_button(send_x, chat_y, send_w, chat_h, "SEND", true, is_chat_active, mx, my);
-    
-    // -------------------------------------------------------------
-    // BOTTOM CONTROLS BAR: Action log navigation buttons at bottom of UI box
-    // -------------------------------------------------------------
-    var footer_y = log_y2 - 30;
-    
-    // Left: Expand / Collapse window button
-    var btn_toggle_w = 115;
-    var btn_toggle_x = log_x + 12;
-    var toggle_lbl = (log_x < 1400) ? "> Collapse" : "< Expand";
-    state.action_log_btn_toggle_hover = ui_draw_button(btn_toggle_x, footer_y, btn_toggle_w, 24, toggle_lbl, true, (log_x < 1400), mx, my);
-    
-    // Right: Directional scroll buttons (<, >, ^, v) and Top reset button
-    var btn_arr_w = 26;
-    var btn_down_x = 1888 - btn_arr_w;
-    var btn_up_x = btn_down_x - btn_arr_w - 4;
-    var btn_right_x = btn_up_x - btn_arr_w - 6;
-    var btn_left_x = btn_right_x - btn_arr_w - 4;
-    
-    var btn_top_w = 42;
-    var btn_top_x = btn_left_x - btn_top_w - 6;
-    
-    state.action_log_btn_top_hover = ui_draw_button(btn_top_x, footer_y, btn_top_w, 24, "Top", true, (state.action_log_scroll_y == 0), mx, my);
-    state.action_log_btn_left_hover = ui_draw_button(btn_left_x, footer_y, btn_arr_w, 24, "<", true, false, mx, my);
-    state.action_log_btn_right_hover = ui_draw_button(btn_right_x, footer_y, btn_arr_w, 24, ">", true, false, mx, my);
-    state.action_log_btn_up_hover = ui_draw_button(btn_up_x, footer_y, btn_arr_w, 24, "^", true, false, mx, my);
-    state.action_log_btn_down_hover = ui_draw_button(btn_down_x, footer_y, btn_arr_w, 24, "v", true, false, mx, my);
-    
-    if (state.action_log_btn_toggle_hover) {
-        state.hover_tooltip = (log_x < 1400) ? "Collapse action log back to right panel" : "Expand action log to cover map";
-    } else if (state.action_log_btn_top_hover) {
-        state.hover_tooltip = "Scroll log to newest / top entry";
-    } else if (state.action_log_btn_left_hover) {
-        state.hover_tooltip = "Scroll log left";
-    } else if (state.action_log_btn_right_hover) {
-        state.hover_tooltip = "Scroll log right";
-    } else if (state.action_log_btn_up_hover) {
-        state.hover_tooltip = "Scroll log up";
-    } else if (state.action_log_btn_down_hover) {
-        state.hover_tooltip = "Scroll log down";
-    }
-}
-
-function ui_draw_bottom_panel(state, mx, my) {
-    var px = 20;
-    var py = 635;
-    var pw = 1880;
-    var ph = 435;
-    
-    // Panel container
-    draw_set_color(make_color_rgb(20, 24, 33));
-    draw_roundrect_ext(px, py, px + pw, py + ph, 16, 16, false);
-    draw_set_color(make_color_rgb(52, 73, 94));
-    draw_roundrect_ext(px, py, px + pw, py + ph, 16, 16, true);
-    
-    // -------------------------------------------------------------
-    // 1. RESOURCE METER (Lumber, Gold, Scrap, Stone, Crystals, Power Gems, Metal)
-    // -------------------------------------------------------------
-    var res_box_x = px + 15;
-    var res_box_y = py + 10;
-    var res_w = 88;
-    var res_h = 68;
-    
-    var res_order = [
-        { key: "wood", label: "Lumber", col: make_color_rgb(141, 110, 99), tcol: c_white },
-        { key: "gold", label: "Gold", col: make_color_rgb(255, 215, 0), tcol: make_color_rgb(20, 20, 20) },
-        { key: "scrap", label: "Scrap", col: make_color_rgb(158, 158, 158), tcol: make_color_rgb(20, 20, 20) },
-        { key: "stone", label: "Stone", col: make_color_rgb(120, 144, 156), tcol: c_white },
-        { key: "crystals", label: "Crystals", col: make_color_rgb(0, 229, 255), tcol: make_color_rgb(15, 25, 40) },
-        { key: "power_gem", label: "Power Gem", col: make_color_rgb(224, 64, 251), tcol: c_white },
-        { key: "metal", label: "Metal", col: make_color_rgb(207, 216, 220), tcol: make_color_rgb(20, 25, 35) }
-    ];
-    
-    draw_set_halign(fa_center); draw_set_valign(fa_top);
-    for (var r = 0; r < array_length(res_order); r++) {
-        var ro = res_order[r];
-        var rx = res_box_x + r * (res_w + 5);
-        
-        // Slot border
-        draw_set_color(make_color_rgb(30, 38, 50));
-        draw_rectangle(rx, res_box_y, rx + res_w, res_box_y + res_h, false);
-        draw_set_color(make_color_rgb(60, 75, 95));
-        draw_rectangle(rx, res_box_y, rx + res_w, res_box_y + res_h, true);
-        
-        // Label - ensure uniform top alignment for every single resource slot
-        draw_set_halign(fa_center); draw_set_valign(fa_top);
-        draw_set_color(c_white);
-        draw_text(rx + res_w * 0.5, res_box_y + 4, ro.label);
-        
-        var val = state.storage[$ ro.key];
-        
-        // Resource Token: Colored circle with quantity number inside (No dice!)
-        var rcx = rx + res_w * 0.5;
-        var rcy = res_box_y + 42;
-        var rrad = 18;
-        
-        draw_set_color(ro.col);
-        draw_circle(rcx, rcy, rrad, false);
-        draw_set_color(c_white);
-        draw_circle(rcx, rcy, rrad, true);
-        
-        draw_set_halign(fa_center); draw_set_valign(fa_middle);
-        draw_set_color(ro.tcol);
-        draw_text(rcx, rcy, string(val));
-    }
-    
-    // -------------------------------------------------------------
-    // 2. ACTIVE PLAYER BAR OR WEAPONS DEFENSE TACTICAL CONSOLE
-    // -------------------------------------------------------------
-    if (state.phase == "combat_weapons" || state.phase == "combat_aliens") {
-        var console_x = res_box_x + 7 * (res_w + 5) + 12;
-        var console_w = (px + pw - 15) - console_x;
-        var console_h = res_h;
-        
-        draw_set_color(make_color_rgb(18, 24, 36));
-        draw_roundrect_ext(console_x, res_box_y, console_x + console_w, res_box_y + console_h, 8, 8, false);
-        draw_set_color(make_color_rgb(0, 229, 255));
-        draw_roundrect_ext(console_x, res_box_y, console_x + console_w, res_box_y + console_h, 8, 8, true);
-        
-        draw_set_halign(fa_center); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(255, 215, 0));
-        draw_text(console_x + console_w * 0.5, res_box_y + console_h * 0.5, "TACTICAL COMBAT CONSOLE ACTIVE // TARGETING DISPLAY IN MISSION WINDOW ABOVE");
-        
-        // Clear standard action button hovers
-        state.btn_gather_hover = false;
-        state.btn_craft_hover = false;
-        state.btn_dismantle_hover = false;
-        state.btn_shop_hover = false;
-        state.btn_repair_hover = false;
-        state.btn_town_hover = false;
-        state.btn_fire_hover = false;
-        state.btn_endturn_hover = false;
-        state.btn_combat_hover = false;
-    }
-    else {
-        // Standard Active Player Bar & Status
-        var p_panel_x = res_box_x + 7 * (res_w + 5) + 12;
-        var p_panel_w = 345;
-        var cur_p = state.players[state.current_player_idx];
-        
-        draw_set_color(make_color_rgb(30, 38, 50));
-        draw_roundrect_ext(p_panel_x, res_box_y, p_panel_x + p_panel_w, res_box_y + res_h, 8, 8, false);
-        draw_set_color(cur_p.color);
-        draw_roundrect_ext(p_panel_x, res_box_y, p_panel_x + p_panel_w, res_box_y + res_h, 8, 8, true);
-        
-        draw_set_halign(fa_left); draw_set_valign(fa_top);
-        draw_set_color(cur_p.color);
-        draw_text(p_panel_x + 12, res_box_y + 5, cur_p.name + " (Active Turn)");
-        
-        // Centered Energy Row: Exact counter and yellow lightning bolt icons that scale cleanly to fit
-        var energy_row_y = res_box_y + 31;
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(c_white);
-        var e_txt = "Energy: " + string(cur_p.energy) + "/" + string(cur_p.max_energy);
-        draw_text(p_panel_x + 12, energy_row_y, e_txt);
-        
-        var energy_label_w = string_width(e_txt);
-        var avail_bolt_w = (p_panel_w - 20) - (12 + energy_label_w + 10);
-        var bolt_spacing = clamp(floor(avail_bolt_w / max(1, cur_p.max_energy)), 10, 20);
-        var bolt_size = clamp(bolt_spacing - 2, 8, 16);
-        var start_bolt_x = p_panel_x + 12 + energy_label_w + 10;
-        
-        for (var e = 0; e < cur_p.max_energy; e++) {
-            var bx = start_bolt_x + e * bolt_spacing;
-            var has_energy = (e < cur_p.energy);
-            ui_draw_lightning(bx, energy_row_y, bolt_size, has_energy);
-        }
-        
-        // Perk / Role Tag
-        draw_set_halign(fa_left); draw_set_valign(fa_top);
-        draw_set_color(make_color_rgb(170, 205, 240));
-        var perk_disp = cur_p.character.name + " (" + cur_p.character.perk_tag + ")";
-        if (string_length(perk_disp) > 36) perk_disp = string_copy(perk_disp, 1, 34) + "..";
-        draw_text(p_panel_x + 12, res_box_y + 47, perk_disp);
-        
-        // -------------------------------------------------------------
-        // 3. ACTION BUTTONS (Clean 2-Row Grid on Top Right)
-        // -------------------------------------------------------------
-        var btn_x0 = p_panel_x + p_panel_w + 14;
-        var btn_y1 = res_box_y;
-        var btn_y2 = res_box_y + 35;
-        var btn_w1 = 195;
-        var btn_w2 = 215;
-        var btn_h = 31;
-        
-        var is_scout = (variable_struct_exists(cur_p, "character") && cur_p.character.id == "scout");
-        var task_cost = is_scout ? 2 : 1;
-        
-        var cur_node = state.nodes[$ cur_p.node];
-        var can_gather = (cur_p.energy >= task_cost && (cur_node.type == "gather_forest" || string_pos("gather_cave", cur_node.type) > 0));
-        var can_craft = (cur_p.energy >= task_cost && (cur_p.node == "main_base" || cur_p.node == "workstation"));
-        var can_shop = true; // Always viewable from anywhere
-        var can_repair = true; // Always viewable from anywhere
-        var can_town = true; // Always viewable from anywhere
-        
-        // Check if player is on a tower space to fire mounted weapon or dismantle
-        var cur_tower_idx = -1;
-        if (cur_p.node == "tower_1") cur_tower_idx = 0;
-        else if (cur_p.node == "tower_2") cur_tower_idx = 1;
-        else if (cur_p.node == "tower_3") cur_tower_idx = 2;
-        else if (cur_p.node == "tower_4") cur_tower_idx = 3;
-        
-        var cur_tower_has_wep = (cur_tower_idx >= 0 && !is_undefined(state.towers[cur_tower_idx].weapon) && state.towers[cur_tower_idx].weapon.alive && state.towers[cur_tower_idx].weapon.damage > 0);
-        var cur_tower_has_any_wep = (cur_tower_idx >= 0 && !is_undefined(state.towers[cur_tower_idx].weapon) && state.towers[cur_tower_idx].weapon.alive && state.towers[cur_tower_idx].weapon.hp > 0);
-        var cur_tower_cd = (cur_tower_idx >= 0) ? state.towers[cur_tower_idx].manual_cooldown : 0;
-        var cur_tower_powers = (cur_tower_idx >= 0) ? state.towers[cur_tower_idx].manual_powers_this_turn : 0;
-        var fire_cost = 2;
-        for (var i = 0; i < array_length(state.weapons); i++) {
-            if (state.weapons[i].alive && state.weapons[i].catalog_id == "overcharge_pylon") {
-                fire_cost = 1;
-                break;
-            }
-        }
-        if (variable_struct_exists(cur_p, "character")) {
-            if (cur_p.character.id == "gunner") {
-                fire_cost = 1; // Gunner firing weapon costs only 1 energy instead of 2
-            } else if (cur_p.character.id == "scout") {
-                fire_cost = 2; // Scout tasks cost 2 energy
-            }
-        }
-        var can_fire = (cur_tower_has_wep && cur_tower_cd <= 0 && cur_p.energy >= fire_cost && array_length(state.active_zone) > 0);
-        var fire_lbl = "At Tower Only";
-        if (cur_tower_idx >= 0) {
-            if (!cur_tower_has_wep) fire_lbl = "No Weapon";
-            else if (cur_tower_cd > 0) fire_lbl = "Cooldown (" + string(cur_tower_cd) + "T)";
-            else if (cur_tower_powers > 0) fire_lbl = "Fire (" + string(fire_cost) + "E) [#" + string(cur_tower_powers + 1) + "]";
-            else fire_lbl = "Fire (" + string(fire_cost) + "E)";
-        }
-        
-        var gather_lbl = is_scout ? "Gather (2E) [G]" : "Gather (1E) [G]";
-        var craft_lbl = is_scout ? "Craft Metal (2E)" : "Craft Metal [C]";
-        state.btn_dismantle_hover = false;
-        if (cur_tower_has_any_wep) {
-            craft_lbl = is_scout ? "Dismantle (2E) [D]" : "Dismantle (1E) [D]";
-            can_craft = (cur_p.energy >= task_cost);
-        }
-        
-        var shop_lbl = (cur_p.node == "shop") ? (is_scout ? "Shop (2E) [S]" : "Shop (1E) [S]") : "View Shop [S]";
-        var repair_lbl = (cur_p.node == "workstation") ? (is_scout ? "Workstation (2E) [R]" : "Workstation [R]") : "Workstation [R]";
-        var town_lbl = (cur_p.node == "town") ? (is_scout ? "Town Trade (2E) [T]" : "Town Trade [T]") : "Town Favor [T]";
-        
-        // Row 1
-        state.btn_gather_hover = ui_draw_button(btn_x0, btn_y1, btn_w1, btn_h, gather_lbl, can_gather, false, mx, my);
-        var chov = ui_draw_button(btn_x0 + (btn_w1 + 8), btn_y1, btn_w1, btn_h, craft_lbl, can_craft, false, mx, my);
-        if (cur_tower_has_any_wep) {
-            state.btn_dismantle_hover = chov;
-            state.btn_craft_hover = false;
-            if (chov) {
-                state.hover_tooltip = "Dismantle mounted weapon to clear mount (+1 Scrap salvaged).";
-            }
-        } else {
-            state.btn_craft_hover = chov;
-        }
-        state.btn_shop_hover = ui_draw_button(btn_x0 + 2 * (btn_w1 + 8), btn_y1, btn_w1, btn_h, shop_lbl, can_shop, (cur_p.node == "shop"), mx, my);
-        state.btn_repair_hover = ui_draw_button(btn_x0 + 3 * (btn_w1 + 8), btn_y1, btn_w2, btn_h, repair_lbl, can_repair, (cur_p.node == "workstation"), mx, my);
-        
-        // Row 2
-        state.btn_town_hover = ui_draw_button(btn_x0, btn_y2, btn_w1, btn_h, town_lbl, can_town, (cur_p.node == "town"), mx, my);
-        state.btn_fire_hover = ui_draw_button(btn_x0 + (btn_w1 + 8), btn_y2, btn_w1, btn_h, fire_lbl, can_fire, false, mx, my);
-        state.btn_endturn_hover = ui_draw_button(btn_x0 + 2 * (btn_w1 + 8), btn_y2, btn_w1, btn_h, "Pass Turn", true, false, mx, my);
-        var combat_btn_text = (array_length(state.active_zone) > 0) ? "Begin Defense [Space]" : "Next Day [Space]";
-        state.btn_combat_hover = ui_draw_button(btn_x0 + 3 * (btn_w1 + 8), btn_y2, btn_w2, btn_h, combat_btn_text, true, true, mx, my);
-        if (state.btn_combat_hover) {
-            if (array_length(state.active_zone) > 0) {
-                state.hover_tooltip = "End operative actions and engage active hostiles in tactical combat.";
-            } else {
-                state.hover_tooltip = "No active hostiles attacking. Conclude turn and advance to the next day.";
-            }
-        }
-    }
-    
-    // -------------------------------------------------------------
-    // 4. THE TWO ALIEN ZONES
-    // Row 1: SPAWN ALIEN ZONE (Incoming Next Wave)
-    // Row 2: ACTIVE ALIEN ZONE (Attacking Base Now)
-    // -------------------------------------------------------------
-    var card_w = 152;
-    var card_h1 = 114;
-    var card_h2 = 124;
-    
-    // Top Row: Spawn Alien Zone
-    var alien_start_y = py + 88;
-    draw_set_color(make_color_rgb(180, 210, 240));
-    draw_set_halign(fa_left); draw_set_valign(fa_top);
-    draw_text(px + 16, alien_start_y, "INCOMING SPAWN ZONE (Wave " + string(state.round_number) + " Incoming - Cannot Be Attacked Yet):");
-    
-    var card_y1 = alien_start_y + 20;
-    state.alien_inspect_hover = undefined;
-    if (array_length(state.spawn_zone) == 0) {
-        draw_set_color(make_color_rgb(120, 130, 145));
-        draw_text(px + 16, card_y1 + 12, "(No aliens incoming this wave - Grace period!)");
-    } else {
-        for (var s = 0; s < array_length(state.spawn_zone); s++) {
-            var al = state.spawn_zone[s];
-            ui_draw_alien_card(state, px + 16 + s * (card_w + 12), card_y1, card_w, card_h1, al, false, mx, my, s);
-        }
-    }
-    
-    // Bottom Row: Active Alien Zone with Horizontal Scrolling
-    var active_start_y = card_y1 + card_h1 + 10;
-    var zone_x = px + 16;
-    var zone_w = pw - 32;
-    var card_step = card_w + 12; // 164 px
-    var num_active = array_length(state.active_zone);
-    var total_active_w = (num_active > 0) ? (num_active * card_step - 12) : 0;
-    var max_active_scroll = max(0, total_active_w - zone_w);
-    
-    if (!variable_struct_exists(state, "active_aliens_scroll_x")) state.active_aliens_scroll_x = 0;
-    state.active_aliens_scroll_x = clamp(state.active_aliens_scroll_x, 0, max_active_scroll);
-    
-    // Mouse wheel scrolling when hovered over active alien zone
-    var card_y2 = active_start_y + 20;
-    var in_active_zone = ui_point_in_rect(mx, my, zone_x, active_start_y, zone_w, card_h2 + 35);
-    if (in_active_zone && max_active_scroll > 0) {
-        if (mouse_wheel_down()) state.active_aliens_scroll_x = min(max_active_scroll, state.active_aliens_scroll_x + card_step);
-        if (mouse_wheel_up()) state.active_aliens_scroll_x = max(0, state.active_aliens_scroll_x - card_step);
-    }
-    
-    // Header text & Scroll Buttons
-    draw_set_color(make_color_rgb(255, 138, 128));
-    draw_set_halign(fa_left); draw_set_valign(fa_top);
-    var header_str = "ACTIVE ALIEN ZONE";
-    if (state.phase == "combat_weapons") {
-        if (variable_struct_exists(state, "combat_selected_tower") && state.combat_selected_tower >= 0 && !state.tower_weapon_used[state.combat_selected_tower]) {
-            var tw = state.towers[state.combat_selected_tower];
-            if (tw.alive && !is_undefined(tw.weapon)) {
-                var w = tw.weapon;
-                header_str = "TARGET SELECTION: Aiming " + string_upper(w.name) + " (" + string(w.damage + w.bonus_damage) + " Dmg)";
-                if (game_has_active_scout(state)) {
-                    header_str += "  [SCOUT ALIEN MUST BE KILLED FIRST!]";
-                }
-            } else {
-                header_str = "ACTIVE ALIEN ZONE // Tactical Combat Active";
-            }
-        } else {
-            header_str = "ACTIVE ALIEN ZONE // Tactical Combat Active";
-        }
-    } else {
-        header_str = "ACTIVE ALIEN ZONE (Attacking Base - Click Any Alien to Target or Inspect)";
-        if (max_active_scroll > 0) {
-            header_str += "  [Threats: " + string(num_active) + " // Scroll Left/Right < >]";
-        }
-    }
-    draw_text(zone_x, active_start_y, header_str);
-    
-    if (max_active_scroll > 0) {
-        var can_sc_left = (state.active_aliens_scroll_x > 0);
-        var can_sc_right = (state.active_aliens_scroll_x < max_active_scroll);
-        state.btn_active_scroll_left = ui_draw_button(px + pw - 245, active_start_y - 4, 115, 22, "< Scroll Left", can_sc_left, false, mx, my);
-        state.btn_active_scroll_right = ui_draw_button(px + pw - 120, active_start_y - 4, 115, 22, "Scroll Right >", can_sc_right, false, mx, my);
-    } else {
-        state.btn_active_scroll_left = false;
-        state.btn_active_scroll_right = false;
-    }
-    
-    state.active_alien_hover = -1;
-    if (num_active == 0) {
-        draw_set_color(make_color_rgb(120, 130, 145));
-        draw_text(zone_x, card_y2 + 12, "(Active combat zone clear! All threats neutralized.)");
-    } else {
-        // Draw active aliens using surface clipping so cards never overflow screen
-        var surf_w = max(1, zone_w);
-        var surf_h = card_h2 + 4;
-        if (!variable_struct_exists(state, "active_aliens_surf") || !surface_exists(state.active_aliens_surf)) {
-            state.active_aliens_surf = surface_create(surf_w, surf_h);
-        } else if (surface_get_width(state.active_aliens_surf) != surf_w || surface_get_height(state.active_aliens_surf) != surf_h) {
-            surface_free(state.active_aliens_surf);
-            state.active_aliens_surf = surface_create(surf_w, surf_h);
-        }
-        
-        surface_set_target(state.active_aliens_surf);
-        draw_clear_alpha(c_black, 0);
-        
-        var m_rel_x = (mx >= zone_x && mx <= zone_x + zone_w) ? (mx - zone_x) : -9999;
-        var m_rel_y = my - card_y2;
-        
-        for (var a = 0; a < num_active; a++) {
-            var al = state.active_zone[a];
-            var card_rel_x = a * card_step - state.active_aliens_scroll_x;
-            if (card_rel_x + card_w < 0 || card_rel_x > surf_w) continue;
-            ui_draw_alien_card(state, card_rel_x, 2, card_w, card_h2, al, true, m_rel_x, m_rel_y, a);
-        }
-        
-        surface_reset_target();
-        draw_surface(state.active_aliens_surf, zone_x, card_y2);
-        
-        // Horizontal Scrollbar Track & Thumb
-        if (max_active_scroll > 0) {
-            var bar_y = card_y2 + card_h2 + 8;
-            var bar_h = 6;
-            draw_set_color(make_color_rgb(25, 32, 45));
-            draw_roundrect_ext(zone_x, bar_y, zone_x + zone_w, bar_y + bar_h, 3, 3, false);
-            draw_set_color(make_color_rgb(45, 58, 80));
-            draw_roundrect_ext(zone_x, bar_y, zone_x + zone_w, bar_y + bar_h, 3, 3, true);
-            
-            var thumb_w = max(80, (zone_w / total_active_w) * zone_w);
-            var thumb_x = zone_x + (state.active_aliens_scroll_x / max_active_scroll) * (zone_w - thumb_w);
-            draw_set_color(make_color_rgb(100, 180, 240));
-            draw_roundrect_ext(thumb_x, bar_y, thumb_x + thumb_w, bar_y + bar_h, 3, 3, false);
-        }
-    }
-}
-
-function ui_draw_alien_card(state, cx, cy, cw, ch, alien, is_active, mx, my, alien_idx = -1) {
-    var hovered = ui_point_in_rect(mx, my, cx, cy, cw, ch);
-    
-    var cur_p = state.players[state.current_player_idx];
-    var cur_tower_idx = -1;
-    if (cur_p.node == "tower_1") cur_tower_idx = 0;
-    else if (cur_p.node == "tower_2") cur_tower_idx = 1;
-    else if (cur_p.node == "tower_3") cur_tower_idx = 2;
-    else if (cur_p.node == "tower_4") cur_tower_idx = 3;
-    var cur_tow = (cur_tower_idx >= 0) ? state.towers[cur_tower_idx] : undefined;
-    var cur_tower_has_wep = (!is_undefined(cur_tow) && !is_undefined(cur_tow.weapon) && cur_tow.weapon.alive && cur_tow.weapon.damage > 0);
-    var cur_tower_cd = (!is_undefined(cur_tow)) ? cur_tow.manual_cooldown : 0;
-    var can_pilot = (cur_tower_has_wep && cur_tower_cd <= 0);
-    
-    var has_scout = game_has_active_scout(state);
-    var is_scout_unit = (alien.catalog_id == "scout");
-    var target_locked = (has_scout && !is_scout_unit);
-    
-    if (hovered) {
-        state.alien_inspect_hover = alien;
-        state.hover_tooltip = alien.name + " [Tier " + string(alien.tier) + " Alien]\n" +
-            "Health: " + string(alien.hp) + " / " + string(alien.max_hp) + "  |  Damage: " + string(alien.damage) + "\n" +
-            "Ability: " + alien.ability;
-            
-        if (state.phase == "combat_weapons") {
-            if (is_active && alien_idx >= 0) {
-                state.active_alien_hover = alien_idx;
-                if (target_locked) {
-                    state.hover_tooltip += "\n[CANNOT TARGET: Scout alien must be destroyed first!]";
-                } else if (variable_struct_exists(state, "combat_selected_tower") && state.combat_selected_tower >= 0 && !state.tower_weapon_used[state.combat_selected_tower]) {
-                    var cur_tw = state.towers[state.combat_selected_tower];
-                    if (cur_tw.alive && !is_undefined(cur_tw.weapon)) {
-                        var w_name = cur_tw.weapon.name;
-                        var w_dmg = cur_tw.weapon.damage + cur_tw.weapon.bonus_damage;
-                        state.hover_tooltip += "\n[Click to attack with " + w_name + " (" + string(w_dmg) + " Dmg)]";
-                        if (cur_tw.weapon.catalog_id == "plasma_mortar") {
-                            state.hover_tooltip += "\n[Plasma Mortar: Deals 7 dmg to primary target, and 3 splash dmg to adjacent left & right aliens!]";
-                        }
-                    }
-                }
-            }
-        } else {
-            if (is_active && alien_idx >= 0) {
-                state.active_alien_hover = alien_idx;
-                if (can_pilot) {
-                    state.hover_tooltip += "\n[Click to fire mounted weapon at this target]";
-                } else if (cur_tower_has_wep && cur_tower_cd > 0) {
-                    state.hover_tooltip += "\n[Mounted weapon cooling down (" + string(cur_tower_cd) + " turns left)]";
-                } else {
-                    state.hover_tooltip += "\n[Click to inspect alien intel (Move to an armed Tower to pilot)]";
-                }
-            } else {
-                state.hover_tooltip += "\n[Click to inspect alien details]";
-            }
-        }
-    }
-    
-    // Tier colors
-    var border_col = c_white;
-    if (alien.tier == 1) border_col = make_color_rgb(76, 175, 80);       // Green
-    else if (alien.tier == 2) border_col = make_color_rgb(255, 152, 0);  // Amber
-    else if (alien.tier == 3) border_col = make_color_rgb(244, 67, 54);   // Crimson
-    
-    if (state.phase == "combat_weapons" && is_active) {
-        if (target_locked) {
-            border_col = make_color_rgb(90, 90, 100);
-        } else if (is_scout_unit && has_scout) {
-            border_col = c_yellow;
-        } else if (hovered) {
-            border_col = make_color_rgb(0, 229, 255);
-        }
-    }
-    
-    var bg_col = hovered ? make_color_rgb(45, 52, 71) : make_color_rgb(28, 34, 46);
-    if (state.phase == "combat_weapons" && is_active && target_locked) {
-        bg_col = make_color_rgb(20, 24, 32);
-    }
-    
-    draw_set_color(bg_col);
-    draw_roundrect_ext(cx, cy, cx + cw, cy + ch, 8, 8, false);
-    draw_set_color(border_col);
-    draw_roundrect_ext(cx, cy, cx + cw, cy + ch, 8, 8, true);
-    
-    // Name & Tier
-    draw_set_halign(fa_center); draw_set_valign(fa_top);
-    draw_set_color(c_white);
-    draw_text(cx + cw * 0.5, cy + 6, alien.name);
-    
-    draw_set_color(border_col);
-    draw_text(cx + cw * 0.5, cy + 24, "Tier " + string(alien.tier));
-    
-    // ENEMY HEALTH: RED HEART ICON + ACTUAL NUMBERS
-    ui_draw_heart(cx + 32, cy + 50, 14, make_color_rgb(231, 76, 60));
-    draw_set_halign(fa_left); draw_set_valign(fa_middle);
-    draw_set_color(make_color_rgb(255, 180, 180));
-    draw_text(cx + 46, cy + 50, string(alien.hp) + " / " + string(alien.max_hp));
-    
-    // Miniature Health Bar
-    var bx = cx + 12;
-    var by = cy + 63;
-    var bw = cw - 24;
-    var bh = 5;
-    draw_set_color(make_color_rgb(40, 40, 50));
-    draw_rectangle(bx, by, bx + bw, by + bh, false);
-    var hp_pct = clamp(alien.hp / max(1, alien.max_hp), 0, 1);
-    draw_set_color(make_color_rgb(231, 76, 60));
-    draw_rectangle(bx, by, bx + bw * hp_pct, by + bh, false);
-    
-    // Damage
-    draw_set_halign(fa_center); draw_set_valign(fa_top);
-    draw_set_color(c_yellow);
-    draw_text(cx + cw * 0.5, cy + 72, "Attack: " + string(alien.damage) + " Dmg");
-    
-    // Special Status / Ability Tag
-    var tag = "";
-    if (alien.frozen) tag = "[FROZEN]";
-    else if (alien.vulnerable) tag = "[VULN +1]";
-    else if (alien.catalog_id == "scout") tag = "[TARGET 1ST]";
-    else if (alien.catalog_id == "acid_spitter") tag = "[x2 VS WEP]";
-    else if (alien.catalog_id == "drooper") tag = "[HITS ALL]";
-    else if (alien.catalog_id == "goliath") tag = "[IGNS WEP]";
-    
-    if (tag != "") {
-        draw_set_color(alien.frozen ? c_aqua : c_orange);
-        draw_text(cx + cw * 0.5, cy + 90, tag);
-    }
-    
-    // Interactive action footer text
-    if (is_active) {
-        draw_set_halign(fa_center); draw_set_valign(fa_top);
-        if (state.phase == "combat_weapons") {
-            if (target_locked) {
-                draw_set_color(make_color_rgb(220, 80, 80));
-                draw_text(cx + cw * 0.5, cy + 106, "[SCOUT FIRST]");
-            } else if (is_scout_unit && has_scout) {
-                draw_set_color(c_yellow);
-                draw_text(cx + cw * 0.5, cy + 106, "[TARGET SCOUT]");
-            } else if (hovered) {
-                draw_set_color(make_color_rgb(0, 229, 255));
-                draw_text(cx + cw * 0.5, cy + 106, "[CLICK ATTACK]");
-            } else {
-                draw_set_color(make_color_rgb(130, 180, 230));
-                draw_text(cx + cw * 0.5, cy + 106, "[TARGETABLE]");
-            }
-        } else if (hovered) {
-            if (can_pilot) {
-                draw_set_color(c_yellow);
-                draw_text(cx + cw * 0.5, cy + 106, "[CLICK TARGET]");
-            } else if (cur_tower_has_wep && cur_tower_cd > 0) {
-                draw_set_color(make_color_rgb(255, 120, 120));
-                draw_text(cx + cw * 0.5, cy + 106, "[COOLDOWN: " + string(cur_tower_cd) + "T]");
-            } else {
-                draw_set_color(make_color_rgb(160, 200, 255));
-                draw_text(cx + cw * 0.5, cy + 106, "[CLICK INTEL]");
-            }
-        }
-    }
-}
-
 function ui_draw_modals(state, mx, my) {
     if (is_undefined(state.modal)) return;
     
     var m = state.modal;
-    
-    // Dark overlay
-    draw_set_color(c_black);
-    draw_set_alpha(0.65);
+
+    // Dimmed backdrop with a soft vignette
+    var fade_in = ui_anim("modal_fade", 1, 0.25);
+    draw_set_color(make_color_rgb(2, 4, 8));
+    draw_set_alpha(0.72 * fade_in);
     draw_rectangle(0, 0, 1920, 1080, false);
     draw_set_alpha(1.0);
-    
+
+    if (m.type == "pause") { ui_draw_pause_menu(state, mx, my); state.modal_close_hover = false; return; }
+    if (m.type == "help") { ui_draw_help(state, mx, my); state.modal_close_hover = false; return; }
+
     var mw = 840;
     var mh = 560;
+    if (m.type == "settings") { mw = 900; mh = 640; }
+    if (m.type == "victory" || m.type == "game_over") { mw = 860; mh = 600; }
     if (m.type == "player_setup") {
         mw = 1060;
         mh = 570;
@@ -1636,14 +183,19 @@ function ui_draw_modals(state, mx, my) {
     var mx0 = (1920 - mw) * 0.5;
     var my0 = (1080 - mh) * 0.5;
     
-    draw_set_color(make_color_rgb(26, 32, 44));
-    draw_roundrect_ext(mx0, my0, mx0 + mw, my0 + mh, 16, 16, false);
-    draw_set_color(make_color_rgb(52, 73, 94));
-    draw_roundrect_ext(mx0, my0, mx0 + mw, my0 + mh, 16, 16, true);
-    
-    // Close button [X] (Hide on modal types where user must choose an explicit option)
+    var frame_col = C_LINE_HI;
+    if (m.type == "tactical_combat") frame_col = (state.combat_subphase == "alien_attacks") ? C_BAD : C_WARN;
+    else if (m.type == "game_over") frame_col = C_BAD;
+    else if (m.type == "victory") frame_col = C_GOOD;
+    ui_shadow(mx0, my0, mx0 + mw, my0 + mh, 16, 0.7);
+    ui_box(mx0, my0, mx0 + mw, my0 + mh, C_PANEL, frame_col, 16);
+    draw_set_color(frame_col);
+    draw_line_width(mx0 + 24, my0 + 1, mx0 + mw - 24, my0 + 1, 2);
+    ui_corner_brackets(mx0 - 4, my0 - 4, mx0 + mw + 4, my0 + mh + 4, 22, frame_col, 2);
+
+    // Close button (hidden where the player must pick an explicit option)
     if (m.type != "player_setup" && m.type != "game_over" && m.type != "victory" && m.type != "tactical_combat" && m.type != "alien_damage_decision") {
-        state.modal_close_hover = ui_draw_button(mx0 + mw - 45, my0 + 15, 30, 30, "X", true, false, mx, my);
+        state.modal_close_hover = ui_draw_button(mx0 + mw - 50, my0 + 14, 34, 32, "×", true, false, mx, my, "ghost");
     } else {
         state.modal_close_hover = false;
     }
@@ -1657,7 +209,8 @@ function ui_draw_modals(state, mx, my) {
         
         draw_set_halign(fa_center); draw_set_valign(fa_top);
         draw_set_color(tier_col);
-        draw_text(mx0 + mw * 0.5, my0 + 20, string_upper(al.name) + " // THREAT DOSSIER [TIER " + string(al.tier) + "]");
+        ui_modal_title(mx0 + mw * 0.5, my0 + 16, string_upper(al.name) + "  //  THREAT DOSSIER", tier_col);
+        ui_draw_alien_glyph(mx0 + mw - 110, my0 + 112, al.catalog_id, al.tier, 70, current_time / 1000, 0);
         
         // Stats Overview Box
         var box_x = mx0 + 40;
@@ -1665,10 +218,7 @@ function ui_draw_modals(state, mx, my) {
         var box_w = mw - 80;
         var box_h = 95;
         
-        draw_set_color(make_color_rgb(18, 24, 34));
-        draw_roundrect_ext(box_x, box_y, box_x + box_w, box_y + box_h, 8, 8, false);
-        draw_set_color(tier_col);
-        draw_roundrect_ext(box_x, box_y, box_x + box_w, box_y + box_h, 8, 8, true);
+        ui_box(box_x, box_y, box_x + box_w, box_y + box_h, make_color_rgb(18, 24, 34), tier_col, 8);
         
         // Health with Red Heart Icon
         ui_draw_heart(box_x + 35, box_y + 32, 20, make_color_rgb(231, 76, 60), c_white, 2);
@@ -1677,28 +227,25 @@ function ui_draw_modals(state, mx, my) {
         draw_text(box_x + 55, box_y + 32, "Health: " + string(al.hp) + " / " + string(al.max_hp) + " HP");
         
         // Attack Damage
-        draw_set_color(c_yellow);
+        draw_set_color(C_AMBER);
         draw_text(box_x + 280, box_y + 32, "Attack Power: " + string(al.damage) + " Damage");
         
         // Status Condition
         var stat_str = al.frozen ? "FROZEN (Deals 0 dmg next attack)" : (al.vulnerable ? "VULNERABLE (+1 damage taken)" : "Active Combat Ready");
-        draw_set_color(al.frozen ? c_aqua : (al.vulnerable ? c_orange : make_color_rgb(180, 210, 240)));
+        draw_set_color(al.frozen ? C_ACCENT : (al.vulnerable ? C_WARN : make_color_rgb(180, 210, 240)));
         draw_text(box_x + 55, box_y + 68, "Status Condition: " + stat_str);
         
         // Special Ability Profile
         var ab_y = box_y + box_h + 18;
         var ab_h = 295;
-        draw_set_color(make_color_rgb(18, 24, 34));
-        draw_roundrect_ext(box_x, ab_y, box_x + box_w, ab_y + ab_h, 8, 8, false);
-        draw_set_color(make_color_rgb(70, 85, 110));
-        draw_roundrect_ext(box_x, ab_y, box_x + box_w, ab_y + ab_h, 8, 8, true);
+        ui_box(box_x, ab_y, box_x + box_w, ab_y + ab_h, make_color_rgb(18, 24, 34), make_color_rgb(70, 85, 110), 8);
         
         draw_set_halign(fa_left); draw_set_valign(fa_top);
-        draw_set_color(c_yellow);
+        draw_set_color(C_AMBER);
         draw_text(box_x + 20, ab_y + 16, "TACTICAL PROFILE & SPECIAL ABILITY:");
         
         draw_set_color(c_white);
-        draw_text_ext(box_x + 20, ab_y + 46, al.ability, 22, box_w - 40);
+        ui_text_ext(box_x + 20, ab_y + 46, al.ability, 22, box_w - 40);
         
         // Tactical Tip / Lore
         var tip_text = "";
@@ -1718,7 +265,7 @@ function ui_draw_modals(state, mx, my) {
             draw_set_color(make_color_rgb(100, 210, 255));
             draw_text(box_x + 20, ab_y + 140, "BASE DEFENSE INTEL & TACTICS:");
             draw_set_color(make_color_rgb(200, 225, 245));
-            draw_text_ext(box_x + 20, ab_y + 170, tip_text, 22, box_w - 40);
+            ui_text_ext(box_x + 20, ab_y + 170, tip_text, 22, box_w - 40);
         }
         
         // Close Button
@@ -1736,14 +283,13 @@ function ui_draw_modals(state, mx, my) {
         // 1. HEADER BANNER: MISSION STATUS & TACTICAL DIRECTIVE
         // -------------------------------------------------------------
         var head_y = my0 + 12;
-        draw_set_color(make_color_rgb(18, 24, 38));
-        draw_roundrect_ext(mx0 + 16, head_y, mx0 + mw - 16, head_y + 54, 8, 8, false);
-        draw_set_color(make_color_rgb(45, 65, 95));
-        draw_roundrect_ext(mx0 + 16, head_y, mx0 + mw - 16, head_y + 54, 8, 8, true);
+        ui_box(mx0 + 16, head_y, mx0 + mw - 16, head_y + 54, make_color_rgb(18, 24, 38), make_color_rgb(45, 65, 95), 8);
         
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(make_color_rgb(255, 215, 0));
-        draw_text(mx0 + 32, head_y + 18, "TACTICAL COMBAT // BASE DEFENSE // WAVE " + string(state.round_number));
+        draw_set_font(fnt_h3);
+        draw_text(mx0 + 32, head_y + 17, "TACTICAL DEFENSE  //  DAY " + string(state.round_number));
+        draw_set_font(fnt_body);
         
         // Dynamic prompt / subphase instruction
         var prompt_str = "";
@@ -1783,8 +329,8 @@ function ui_draw_modals(state, mx, my) {
         var spd_x = mx0 + mw - 16 - spd_w;
         var spd_y = head_y + 9;
         var is_2x = (variable_struct_exists(state, "combat_speed_2x") && state.combat_speed_2x);
-        var spd_lbl = is_2x ? "2X SPEED: ON" : "2X SPEED: OFF";
-        state.combat_speed_btn_hover = ui_draw_button(spd_x, spd_y, spd_w, spd_h, spd_lbl, true, is_2x, mx, my);
+        var spd_lbl = is_2x ? "Speed 2x" : "Speed 1x";
+        state.combat_speed_btn_hover = ui_draw_button(spd_x, spd_y, spd_w, spd_h, spd_lbl, true, is_2x, mx, my, "default", "Tab");
         if (state.combat_speed_btn_hover) {
             state.hover_tooltip = "Toggle 2x speed for weapon attacks, projectiles and animations.";
         }
@@ -1794,7 +340,7 @@ function ui_draw_modals(state, mx, my) {
             var adv_h = 36;
             var adv_x = spd_x - adv_w - 12;
             var adv_y = head_y + 9;
-            state.combat_advance_hover = ui_draw_button(adv_x, adv_y, adv_w, adv_h, "Skip to Alien Retaliation >>", true, false, mx, my);
+            state.combat_advance_hover = ui_draw_button(adv_x, adv_y, adv_w, adv_h, "End Volley", array_length(state.combat_player_projectiles) == 0, false, mx, my, "danger", "Space");
             if (state.combat_advance_hover) {
                 state.hover_tooltip = "End weapons attack phase immediately and proceed to alien retaliation.";
             }
@@ -1803,7 +349,7 @@ function ui_draw_modals(state, mx, my) {
             var conc_h = 36;
             var conc_x = spd_x - conc_w - 12;
             var conc_y = head_y + 9;
-            var chov = ui_draw_button(conc_x, conc_y, conc_w, conc_h, "Close Combat Menu [Space] >>", true, true, mx, my);
+            var chov = ui_draw_button(conc_x, conc_y, conc_w, conc_h, "Continue", true, true, mx, my, "success", "Space");
             if (chov) {
                 state.combat_conclude_btn_hover = true;
                 state.hover_tooltip = "Close tactical combat menu and return to the main base.";
@@ -1846,10 +392,7 @@ function ui_draw_modals(state, mx, my) {
         var has_scout_alive = game_has_active_scout(state);
         
         if (num_act == 0) {
-            draw_set_color(make_color_rgb(18, 24, 34));
-            draw_roundrect_ext(mx0 + 30, card_y, mx0 + mw - 30, card_y + 80, 8, 8, false);
-            draw_set_color(make_color_rgb(46, 60, 80));
-            draw_roundrect_ext(mx0 + 30, card_y, mx0 + mw - 30, card_y + 80, 8, 8, true);
+            ui_box(mx0 + 30, card_y, mx0 + mw - 30, card_y + 80, make_color_rgb(18, 24, 34), make_color_rgb(46, 60, 80), 8);
             draw_set_halign(fa_center); draw_set_valign(fa_middle);
             draw_set_color(make_color_rgb(120, 230, 150));
             draw_text(mx0 + mw * 0.5, card_y + 40, "★ ALL ACTIVE THREATS NEUTRALIZED -- SECTOR PERIMETER CLEAR ★");
@@ -1865,88 +408,7 @@ function ui_draw_modals(state, mx, my) {
                 var is_scout = (al.catalog_id == "scout");
                 var is_target_locked = (has_scout_alive && !is_scout);
                 
-                var tier_color = make_color_rgb(76, 175, 80);
-                if (al.tier == 2) tier_color = make_color_rgb(255, 152, 0);
-                else if (al.tier == 3) tier_color = make_color_rgb(244, 67, 54);
-                
-                draw_set_color(make_color_rgb(22, 28, 40));
-                draw_roundrect_ext(ac_x, card_y, ac_x + card_w, card_y + card_h, 8, 8, false);
-                
-                if (is_al_hov && state.combat_subphase == "player_weapons" && !is_target_locked) {
-                    draw_set_color(c_aqua);
-                    draw_roundrect_ext(ac_x - 2, card_y - 2, ac_x + card_w + 2, card_y + card_h + 2, 8, 8, true);
-                } else if (is_scout) {
-                    draw_set_color(make_color_rgb(255, 215, 0));
-                    draw_roundrect_ext(ac_x - 1, card_y - 1, ac_x + card_w + 1, card_y + card_h + 1, 8, 8, true);
-                } else {
-                    draw_set_color(tier_color);
-                    draw_roundrect_ext(ac_x, card_y, ac_x + card_w, card_y + card_h, 8, 8, true);
-                }
-                
-                // Tier badge
-                draw_set_color(tier_color);
-                draw_roundrect_ext(ac_x + 6, card_y + 6, ac_x + 50, card_y + 24, 4, 4, false);
-                draw_set_halign(fa_center); draw_set_valign(fa_middle);
-                draw_set_color(c_black);
-                draw_text(ac_x + 28, card_y + 15, "T" + string(al.tier));
-                
-                // Alien Name
-                draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color(c_white);
-                var max_c = (card_w < 150) ? 9 : 13;
-                var short_al_name = al.name;
-                if (string_length(short_al_name) > max_c) short_al_name = string_copy(short_al_name, 1, max_c - 1) + ".";
-                draw_text(ac_x + 56, card_y + 15, short_al_name);
-                
-                // Health with Red Heart & Bar
-                ui_draw_heart(ac_x + 16, card_y + 40, 11, make_color_rgb(231, 76, 60));
-                draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color(c_white);
-                draw_text(ac_x + 34, card_y + 40, string(al.hp) + "/" + string(al.max_hp) + " HP");
-                
-                // Health Bar Fill
-                var bar_w = card_w - 20;
-                var bar_h = 6;
-                var bar_x = ac_x + 10;
-                var bar_y_pos = card_y + 54;
-                var hp_ratio = clamp(al.hp / max(1, al.max_hp), 0.0, 1.0);
-                draw_set_color(make_color_rgb(40, 40, 50));
-                draw_roundrect_ext(bar_x, bar_y_pos, bar_x + bar_w, bar_y_pos + bar_h, 3, 3, false);
-                draw_set_color(hp_ratio > 0.5 ? make_color_rgb(46, 204, 113) : (hp_ratio > 0.25 ? make_color_rgb(241, 196, 15) : make_color_rgb(231, 76, 60)));
-                draw_roundrect_ext(bar_x, bar_y_pos, bar_x + bar_w * hp_ratio, bar_y_pos + bar_h, 3, 3, false);
-                
-                // Attack Power
-                draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color(make_color_rgb(255, 120, 120));
-                draw_text(ac_x + 12, card_y + 74, "ATK: " + string(al.damage) + " Dmg");
-                
-                // Status Tag
-                if (al.frozen) {
-                    draw_set_color(c_aqua);
-                    draw_text(ac_x + 12, card_y + 92, "[FROZEN - 0 DMG]");
-                } else if (al.tesla_weakened) {
-                    draw_set_color(c_yellow);
-                    draw_text(ac_x + 12, card_y + 92, "[TESLA WEAK -1]");
-                }
-                
-                // Ability Summary
-                draw_set_color(make_color_rgb(180, 205, 230));
-                draw_text_ext(ac_x + 10, card_y + 110, al.ability, 14, card_w - 20);
-                
-                // Scout Target Priority Badge or Target Lock Overlay
-                if (is_scout) {
-                    draw_set_color(make_color_rgb(255, 70, 70));
-                    draw_roundrect_ext(ac_x + 8, card_y + card_h - 26, ac_x + card_w - 8, card_y + card_h - 6, 4, 4, false);
-                    draw_set_halign(fa_center); draw_set_valign(fa_middle);
-                    draw_set_color(c_white);
-                    draw_text(ac_x + card_w * 0.5, card_y + card_h - 16, "PRIORITY TARGET");
-                } else if (is_target_locked) {
-                    draw_set_color(make_color_rgb(60, 20, 20));
-                    draw_roundrect_ext(ac_x + 8, card_y + card_h - 26, ac_x + card_w - 8, card_y + card_h - 6, 4, 4, false);
-                    draw_set_halign(fa_center); draw_set_valign(fa_middle);
-                    draw_set_color(make_color_rgb(255, 120, 120));
-                    draw_text(ac_x + card_w * 0.5, card_y + card_h - 16, "LOCKED BY SCOUT");
-                }
+                ui_draw_combat_alien_card(state, ac_x, card_y, card_w, card_h, al, a, is_al_hov, is_target_locked, is_scout);
             }
         }
         
@@ -1954,6 +416,7 @@ function ui_draw_modals(state, mx, my) {
         // 3. MIDDLE ENGAGEMENT ZONE: TARGETING RETICLES, PROJECTILES & IMPACTS
         // -------------------------------------------------------------
         var mid_y0 = card_y + card_h + 10;
+        ui_draw_combat_battlefield(state, mx0, mw, mid_y0, tw_sec_y - 8);
         
         // Targeting line from active selected tower to hovered alien
         if (state.combat_subphase == "player_weapons" && state.combat_selected_tower >= 0 && state.combat_alien_hover >= 0) {
@@ -1964,7 +427,7 @@ function ui_draw_modals(state, mx, my) {
                 var p_end = state.combat_alien_coords[al_idx];
                 var can_tgt = !(has_scout_alive && state.active_zone[al_idx].catalog_id != "scout");
                 
-                draw_set_color(can_tgt ? c_aqua : make_color_rgb(255, 80, 80));
+                draw_set_color(can_tgt ? C_ACCENT : make_color_rgb(255, 80, 80));
                 draw_set_alpha(0.75);
                 draw_line_width(p_start[0], p_start[1], p_end[0], p_end[1], 3);
                 draw_circle(p_end[0], p_end[1] - card_h * 0.5, 24, true);
@@ -1976,10 +439,7 @@ function ui_draw_modals(state, mx, my) {
                     var dmg_proj = w.damage + w.bonus_damage;
                     var tag_x = (p_start[0] + p_end[0]) * 0.5;
                     var tag_y = (p_start[1] + p_end[1]) * 0.5;
-                    draw_set_color(c_black);
-                    draw_roundrect_ext(tag_x - 45, tag_y - 14, tag_x + 45, tag_y + 14, 4, 4, false);
-                    draw_set_color(c_yellow);
-                    draw_roundrect_ext(tag_x - 45, tag_y - 14, tag_x + 45, tag_y + 14, 4, 4, true);
+                    ui_box(tag_x - 45, tag_y - 14, tag_x + 45, tag_y + 14, c_black, C_AMBER, 4);
                     draw_set_halign(fa_center); draw_set_valign(fa_middle);
                     draw_text(tag_x, tag_y, "-" + string(dmg_proj) + " DMG");
                 }
@@ -2127,10 +587,7 @@ function ui_draw_modals(state, mx, my) {
             var con_panel_x = mx0 + (mw - con_panel_w) * 0.5;
             var con_panel_y = mid_center_y - con_panel_h * 0.5;
             
-            draw_set_color(make_color_rgb(18, 24, 36));
-            draw_roundrect_ext(con_panel_x, con_panel_y, con_panel_x + con_panel_w, con_panel_y + con_panel_h, 12, 12, false);
-            draw_set_color(make_color_rgb(46, 204, 113));
-            draw_roundrect_ext(con_panel_x, con_panel_y, con_panel_x + con_panel_w, con_panel_y + con_panel_h, 12, 12, true);
+            ui_box(con_panel_x, con_panel_y, con_panel_x + con_panel_w, con_panel_y + con_panel_h, make_color_rgb(18, 24, 36), make_color_rgb(46, 204, 113), 12);
             
             draw_set_halign(fa_center); draw_set_valign(fa_top);
             var con_title = "COMBAT ENGAGEMENT CONCLUDED";
@@ -2154,7 +611,7 @@ function ui_draw_modals(state, mx, my) {
             var conc_btn_h = 44;
             var conc_btn_x = con_panel_x + (con_panel_w - conc_btn_w) * 0.5;
             var conc_btn_y = con_panel_y + 92;
-            var conc_b_hover = ui_draw_button(conc_btn_x, conc_btn_y, conc_btn_w, conc_btn_h, "Close Combat Menu & Proceed [Space]", true, true, mx, my);
+            var conc_b_hover = ui_draw_button(conc_btn_x, conc_btn_y, conc_btn_w, conc_btn_h, "Return to Base", true, true, mx, my, "success", "Space");
             if (conc_b_hover) {
                 state.combat_conclude_btn_hover = true;
                 state.hover_tooltip = "Close tactical combat display and return to the main base.";
@@ -2162,162 +619,33 @@ function ui_draw_modals(state, mx, my) {
         }
         
         // -------------------------------------------------------------
-        // 4. BOTTOM SECTION: 4 BASE TOWERS & MOUNTED WEAPONS
+        // 4. BOTTOM SECTION: TOWER HARDPOINTS
         // -------------------------------------------------------------
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(100, 210, 255));
-        draw_text(mx0 + 32, tw_sec_y, "BASE FORTIFICATIONS // SECTOR DEFENSE WEAPONS");
-        
+        ui_section_label(mx0 + 32, tw_sec_y, "Base hardpoints  -  arm a weapon, then click an alien");
         state.combat_tower_coords = [];
-        
         for (var t = 0; t < 4; t++) {
-            var tow = state.towers[t];
-            var twep = tow.weapon;
             var t_x = slot_start_x + t * (slot_w + slot_gap);
             state.combat_tower_coords[t] = [t_x + slot_w * 0.5, slot_y];
-            
-            var is_tow_hov = ui_point_in_rect(mx, my, t_x, slot_y, slot_w, slot_h);
-            state.combat_tower_hover[t] = is_tow_hov;
-            
-            var has_wep = (!is_undefined(twep) && twep.alive);
-            var is_used = state.tower_weapon_used[t];
-            var is_sel = (state.combat_selected_tower == t && !is_used && has_wep);
-            var shots_rem = state.tower_weapon_shots[t];
-            var max_shots = state.tower_weapon_max_shots[t];
-            
-            // Background Card
-            if (!tow.alive) {
-                // Destroyed tower card
-                draw_set_color(make_color_rgb(18, 14, 16));
-                draw_roundrect_ext(t_x, slot_y, t_x + slot_w, slot_y + slot_h, 8, 8, false);
-                draw_set_color(make_color_rgb(120, 40, 40));
-                draw_roundrect_ext(t_x, slot_y, t_x + slot_w, slot_y + slot_h, 8, 8, true);
-                
-                draw_set_halign(fa_center); draw_set_valign(fa_middle);
-                draw_set_color(make_color_rgb(255, 80, 80));
-                draw_text(t_x + slot_w * 0.5, slot_y + 40, "SECTOR TOWER " + string(t + 1) + " // DESTROYED");
-                draw_set_color(make_color_rgb(180, 120, 120));
-                draw_text(t_x + slot_w * 0.5, slot_y + 120, "Tower defenses have fallen.\nCannot mount weapons or absorb attacks.");
-                continue;
+            var tres = ui_draw_combat_tower_card(state, t, t_x, slot_y, slot_w, slot_h, mx, my);
+            state.combat_tower_hover[t] = tres.hover;
+            if (tres.tesla_hover) {
+                state.combat_tesla_btn_hover = true;
+                state.hover_tooltip = "Discharge the Tesla coil: damages and weakens every active alien.";
             }
-            
-            if (!has_wep) {
-                // Empty Hardpoint
-                draw_set_color(make_color_rgb(18, 24, 32));
-                draw_roundrect_ext(t_x, slot_y, t_x + slot_w, slot_y + slot_h, 8, 8, false);
-                draw_set_color(make_color_rgb(50, 70, 95));
-                draw_roundrect_ext(t_x, slot_y, t_x + slot_w, slot_y + slot_h, 8, 8, true);
-                
-                // Tower Header
-                draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color(make_color_rgb(140, 180, 220));
-                draw_text(t_x + 16, slot_y + 22, tow.name + " Fortification");
-                
-                // Tower Health
-                ui_draw_heart(t_x + 20, slot_y + 54, 12, make_color_rgb(46, 204, 113));
-                draw_set_color(c_white);
-                draw_text(t_x + 40, slot_y + 54, "Tower Integrity: " + string(tow.hp) + " / 10 HP");
-                
-                // Empty slot banner
-                draw_set_color(make_color_rgb(26, 34, 46));
-                draw_roundrect_ext(t_x + 16, slot_y + 90, t_x + slot_w - 16, slot_y + slot_h - 24, 6, 6, false);
-                draw_set_color(make_color_rgb(50, 65, 85));
-                draw_roundrect_ext(t_x + 16, slot_y + 90, t_x + slot_w - 16, slot_y + slot_h - 24, 6, 6, true);
-                
-                draw_set_halign(fa_center); draw_set_valign(fa_middle);
-                draw_set_color(make_color_rgb(160, 180, 200));
-                draw_text(t_x + slot_w * 0.5, slot_y + 150, "[EMPTY DEFENSE HARDPOINT]\nNo weapon stationed at this tower.");
-                draw_set_color(make_color_rgb(110, 130, 155));
-                draw_text(t_x + slot_w * 0.5, slot_y + 210, "Forge blueprints at the Workstation\nto station defensive turrets here.");
-                continue;
+        }
+        // Floating damage numbers
+        if (is_array(state.combat_texts)) {
+            draw_set_halign(fa_center); draw_set_valign(fa_middle);
+            for (var ct = 0; ct < array_length(state.combat_texts); ct++) {
+                var ctx = state.combat_texts[ct];
+                var pop = 1 + max(0, (ctx.life - (ctx.max_life - 8)) / 8) * 0.6;
+                draw_set_font(ctx.big ? fnt_h1 : fnt_h2);
+                draw_set_alpha(clamp(ctx.life / 18, 0, 1));
+                if (pop > 1.01) draw_text_transformed_color(ctx.x, ctx.y, ctx.text, pop, pop, 0, ctx.color, ctx.color, ctx.color, ctx.color, draw_get_alpha());
+                else ui_text_outline(ctx.x, ctx.y, ctx.text, ctx.color);
             }
-            
-            // Mounted Weapon Card
-            if (is_used) {
-                // Greys out as it was used!
-                draw_set_color(make_color_rgb(20, 22, 28));
-                draw_roundrect_ext(t_x, slot_y, t_x + slot_w, slot_y + slot_h, 8, 8, false);
-                draw_set_color(make_color_rgb(55, 60, 70));
-                draw_roundrect_ext(t_x, slot_y, t_x + slot_w, slot_y + slot_h, 8, 8, true);
-            } else if (is_sel) {
-                // Bright glowing selected state
-                draw_set_color(make_color_rgb(24, 38, 55));
-                draw_roundrect_ext(t_x, slot_y, t_x + slot_w, slot_y + slot_h, 8, 8, false);
-                draw_set_color(make_color_rgb(100, 230, 255));
-                draw_roundrect_ext(t_x - 2, slot_y - 2, t_x + slot_w + 2, slot_y + slot_h + 2, 8, 8, true);
-            } else {
-                // Ready to select
-                draw_set_color(make_color_rgb(22, 30, 44));
-                draw_roundrect_ext(t_x, slot_y, t_x + slot_w, slot_y + slot_h, 8, 8, false);
-                draw_set_color(is_tow_hov ? c_aqua : make_color_rgb(52, 152, 219));
-                draw_roundrect_ext(t_x, slot_y, t_x + slot_w, slot_y + slot_h, 8, 8, true);
-            }
-            
-            // Header: Tower & Weapon Name
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(is_used ? make_color_rgb(130, 140, 150) : (is_sel ? make_color_rgb(255, 215, 0) : c_white));
-            var w_hdr = string_upper(twep.name) + " [" + tow.name + "]";
-            if (string_width(w_hdr) > slot_w - 180) {
-                w_hdr = string_upper(twep.name);
-            }
-            draw_text(t_x + 16, slot_y + 20, w_hdr);
-            
-            // Status Badge
-            var badge_lbl = is_used ? "[EXHAUSTED / USED]" : (is_sel ? "[ARMED // ACTIVE]" : "[CLICK TO SELECT]");
-            var badge_col = is_used ? make_color_rgb(100, 110, 120) : (is_sel ? make_color_rgb(100, 230, 255) : make_color_rgb(46, 204, 113));
-            draw_set_halign(fa_right); draw_set_valign(fa_middle);
-            draw_set_color(badge_col);
-            draw_text(t_x + slot_w - 16, slot_y + 20, badge_lbl);
-            
-            // Health Stats
-            ui_draw_heart(t_x + 18, slot_y + 48, 10, make_color_rgb(231, 76, 60));
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(is_used ? make_color_rgb(140, 150, 160) : c_white);
-            draw_text(t_x + 36, slot_y + 48, "Weapon HP: " + string(twep.hp) + " / " + string(twep.max_hp));
-            
-            draw_set_color(is_used ? make_color_rgb(120, 130, 140) : make_color_rgb(100, 200, 255));
-            draw_text(t_x + 220, slot_y + 48, "Tower: " + string(tow.hp) + " / 10 HP");
-            
-            // Damage & Shots
-            var eff_dmg = twep.damage + twep.bonus_damage;
-            draw_set_color(is_used ? make_color_rgb(140, 150, 160) : make_color_rgb(255, 215, 0));
-            draw_text(t_x + 16, slot_y + 78, "Damage: " + string(eff_dmg) + " Dmg");
-            
-            var shots_str = string(shots_rem) + " / " + string(max_shots) + " Shots";
-            draw_set_color(shots_rem > 0 ? make_color_rgb(100, 230, 255) : make_color_rgb(140, 150, 160));
-            draw_text(t_x + 220, slot_y + 78, shots_str);
-            
-            // Ability Box
-            draw_set_color(make_color_rgb(18, 22, 30));
-            draw_roundrect_ext(t_x + 14, slot_y + 104, t_x + slot_w - 14, slot_y + slot_h - 60, 4, 4, false);
-            draw_set_color(make_color_rgb(45, 55, 75));
-            draw_roundrect_ext(t_x + 14, slot_y + 104, t_x + slot_w - 14, slot_y + slot_h - 60, 4, 4, true);
-            
-            draw_set_halign(fa_left); draw_set_valign(fa_top);
-            draw_set_color(is_used ? make_color_rgb(120, 130, 140) : make_color_rgb(180, 205, 230));
-            draw_text_ext(t_x + 22, slot_y + 112, twep.ability, 16, slot_w - 44);
-            
-            // Tesla Coil Discharge Action Button
-            if (twep.catalog_id == "tesla" && !is_used && state.combat_subphase == "player_weapons") {
-                var btn_y_tes = slot_y + slot_h - 48;
-                state.combat_tesla_btn_hover = ui_draw_button(t_x + 14, btn_y_tes, slot_w - 28, 38, "⚡ Discharge (Hit All)", true, false, mx, my);
-                if (state.combat_tesla_btn_hover) {
-                    state.hover_tooltip = "Discharge shockwave dealing " + string(eff_dmg) + " damage and weakening ALL active aliens!";
-                }
-            } else {
-                // Click weapon selection action / status text
-                draw_set_halign(fa_center); draw_set_valign(fa_middle);
-                if (is_used) {
-                    draw_set_color(make_color_rgb(110, 120, 130));
-                    draw_text(t_x + slot_w * 0.5, slot_y + slot_h - 28, "All shots fired for this wave");
-                } else if (is_sel) {
-                    draw_set_color(make_color_rgb(100, 230, 255));
-                    draw_text(t_x + slot_w * 0.5, slot_y + slot_h - 28, "TARGET READY // Click alien above to fire");
-                } else {
-                    draw_set_color(make_color_rgb(255, 215, 0));
-                    draw_text(t_x + slot_w * 0.5, slot_y + slot_h - 28, "[Click to Arm This Weapon]");
-                }
-            }
+            draw_set_alpha(1);
+            draw_set_font(fnt_body);
         }
     }
     else if (m.type == "shop") {
@@ -2325,8 +653,8 @@ function ui_draw_modals(state, mx, my) {
         // HEADER: TITLE & CORE HUD BADGES
         // -------------------------------------------------------------
         draw_set_halign(fa_center); draw_set_valign(fa_top);
-        draw_set_color(c_yellow);
-        draw_text(mx0 + mw * 0.5, my0 + 14, "WEAPON & DEFENSE BLUEPRINT SHOP");
+        draw_set_color(C_AMBER);
+        ui_modal_title(mx0 + mw * 0.5, my0 + 10, "BLUEPRINT SHOP", C_AMBER);
         
         var cur_p = state.players[state.current_player_idx];
         var is_at_shop = (cur_p.node == "shop");
@@ -2340,10 +668,7 @@ function ui_draw_modals(state, mx, my) {
         var st_x = mx0 + 30;
         var st_y = my0 + 44;
         
-        draw_set_color(is_at_shop ? make_color_rgb(16, 38, 24) : make_color_rgb(38, 30, 14));
-        draw_roundrect_ext(st_x, st_y, st_x + st_w, st_y + st_h, 6, 6, false);
-        draw_set_color(is_at_shop ? make_color_rgb(46, 204, 113) : make_color_rgb(243, 156, 18));
-        draw_roundrect_ext(st_x, st_y, st_x + st_w, st_y + st_h, 6, 6, true);
+        ui_box(st_x, st_y, st_x + st_w, st_y + st_h, is_at_shop ? make_color_rgb(16, 38, 24) : make_color_rgb(38, 30, 14), is_at_shop ? make_color_rgb(46, 204, 113) : make_color_rgb(243, 156, 18), 6);
         
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(is_at_shop ? make_color_rgb(140, 240, 170) : make_color_rgb(255, 200, 80));
@@ -2356,10 +681,7 @@ function ui_draw_modals(state, mx, my) {
         var gold_x = st_x + st_w + 20;
         var gold_y = my0 + 44;
         
-        draw_set_color(make_color_rgb(36, 30, 14));
-        draw_roundrect_ext(gold_x, gold_y, gold_x + gold_w, gold_y + gold_h, 6, 6, false);
-        draw_set_color(make_color_rgb(255, 215, 0));
-        draw_roundrect_ext(gold_x, gold_y, gold_x + gold_w, gold_y + gold_h, 6, 6, true);
+        ui_box(gold_x, gold_y, gold_x + gold_w, gold_y + gold_h, make_color_rgb(36, 30, 14), make_color_rgb(255, 215, 0), 6);
         
         // Small gold coin icon
         draw_set_color(make_color_rgb(255, 215, 0));
@@ -2414,23 +736,17 @@ function ui_draw_modals(state, mx, my) {
             var card_hov = ui_point_in_rect(mx, my, wx, wy, card_w, card_h);
             
             // Outer Card Plate
-            draw_set_color(card_hov ? make_color_rgb(32, 40, 56) : make_color_rgb(22, 28, 40));
-            draw_roundrect_ext(wx, wy, wx + card_w, wy + card_h, 10, 10, false);
-            draw_set_color(make_color_rgb(255, 215, 0));
-            draw_roundrect_ext(wx, wy, wx + card_w, wy + card_h, 10, 10, true);
+            ui_box(wx, wy, wx + card_w, wy + card_h, card_hov ? make_color_rgb(32, 40, 56) : make_color_rgb(22, 28, 40), make_color_rgb(255, 215, 0), 10);
             
             // 1. Weapon Name
             draw_set_halign(fa_center); draw_set_valign(fa_top);
-            draw_set_color(c_yellow);
+            draw_set_color(C_AMBER);
             draw_text(wx + card_w * 0.5, wy + 14, item.name);
             
             // 2. Stats Badge Plate (HP, Dmg, Targets)
             var st_py = wy + 40;
             var st_ph = 30;
-            draw_set_color(make_color_rgb(16, 20, 30));
-            draw_roundrect_ext(wx + 12, st_py, wx + card_w - 12, st_py + st_ph, 6, 6, false);
-            draw_set_color(make_color_rgb(46, 60, 80));
-            draw_roundrect_ext(wx + 12, st_py, wx + card_w - 12, st_py + st_ph, 6, 6, true);
+            ui_box(wx + 12, st_py, wx + card_w - 12, st_py + st_ph, make_color_rgb(16, 20, 30), make_color_rgb(46, 60, 80), 6);
             
             // Heart icon + HP
             ui_draw_heart(wx + 26, st_py + st_ph * 0.5, 12, make_color_rgb(231, 76, 60));
@@ -2450,25 +766,19 @@ function ui_draw_modals(state, mx, my) {
             // 3. Tactical Ability Box
             var ab_py = wy + 78;
             var ab_ph = 86;
-            draw_set_color(make_color_rgb(16, 20, 30));
-            draw_roundrect_ext(wx + 12, ab_py, wx + card_w - 12, ab_py + ab_ph, 6, 6, false);
-            draw_set_color(make_color_rgb(46, 60, 80));
-            draw_roundrect_ext(wx + 12, ab_py, wx + card_w - 12, ab_py + ab_ph, 6, 6, true);
+            ui_box(wx + 12, ab_py, wx + card_w - 12, ab_py + ab_ph, make_color_rgb(16, 20, 30), make_color_rgb(46, 60, 80), 6);
             
             draw_set_halign(fa_left); draw_set_valign(fa_top);
             draw_set_color(make_color_rgb(100, 210, 255));
             draw_text(wx + 20, ab_py + 8, "TACTICAL ABILITY:");
             
             draw_set_color(make_color_rgb(220, 235, 245));
-            draw_text_ext(wx + 20, ab_py + 26, item.ability, 17, card_w - 40);
+            ui_text_ext(wx + 20, ab_py + 26, item.ability, 17, card_w - 40);
             
             // 4. Blueprint Specs & Materials Box
             var sp_py = wy + 172;
             var sp_ph = 254;
-            draw_set_color(make_color_rgb(16, 20, 30));
-            draw_roundrect_ext(wx + 12, sp_py, wx + card_w - 12, sp_py + sp_ph, 6, 6, false);
-            draw_set_color(make_color_rgb(46, 60, 80));
-            draw_roundrect_ext(wx + 12, sp_py, wx + card_w - 12, sp_py + sp_ph, 6, 6, true);
+            ui_box(wx + 12, sp_py, wx + card_w - 12, sp_py + sp_ph, make_color_rgb(16, 20, 30), make_color_rgb(46, 60, 80), 6);
             
             // Price Tag
             draw_set_color(make_color_rgb(255, 215, 0));
@@ -2505,13 +815,7 @@ function ui_draw_modals(state, mx, my) {
                 
                 var my_row = mat_start_y + k * 24;
                 
-                // Mini resource token
-                draw_set_color(rdef.color);
-                draw_circle(wx + 28, my_row, 8, false);
-                draw_set_color(c_white);
-                draw_circle(wx + 28, my_row, 8, true);
-                draw_set_halign(fa_center); draw_set_valign(fa_middle);
-                draw_text(wx + 28, my_row, rdef.icon_char);
+                ui_icon_resource(wx + 28, my_row, rk, 18);
                 
                 // Label
                 draw_set_halign(fa_left); draw_set_valign(fa_middle);
@@ -2552,8 +856,8 @@ function ui_draw_modals(state, mx, my) {
         // HEADER: TITLE & CORE HUD BADGES
         // -------------------------------------------------------------
         draw_set_halign(fa_center); draw_set_valign(fa_top);
-        draw_set_color(c_yellow);
-        draw_text(mx0 + mw * 0.5, my0 + 14, "TOWN TRADING MARKET");
+        draw_set_color(C_AMBER);
+        ui_modal_title(mx0 + mw * 0.5, my0 + 10, "TOWN MARKET", C_AMBER);
         
         var cur_fav = state.town_favors[state.active_town_favor];
         var cur_p = state.players[state.current_player_idx];
@@ -2568,10 +872,7 @@ function ui_draw_modals(state, mx, my) {
         var st_x = mx0 + 30;
         var st_y = my0 + 44;
         
-        draw_set_color(is_at_town ? make_color_rgb(16, 38, 24) : make_color_rgb(38, 30, 14));
-        draw_roundrect_ext(st_x, st_y, st_x + st_w, st_y + st_h, 6, 6, false);
-        draw_set_color(is_at_town ? make_color_rgb(46, 204, 113) : make_color_rgb(243, 156, 18));
-        draw_roundrect_ext(st_x, st_y, st_x + st_w, st_y + st_h, 6, 6, true);
+        ui_box(st_x, st_y, st_x + st_w, st_y + st_h, is_at_town ? make_color_rgb(16, 38, 24) : make_color_rgb(38, 30, 14), is_at_town ? make_color_rgb(46, 204, 113) : make_color_rgb(243, 156, 18), 6);
         
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(is_at_town ? make_color_rgb(140, 240, 170) : make_color_rgb(255, 200, 80));
@@ -2584,10 +885,7 @@ function ui_draw_modals(state, mx, my) {
         var gold_x = mx0 + mw - 30 - gold_w;
         var gold_y = my0 + 44;
         
-        draw_set_color(make_color_rgb(36, 30, 14));
-        draw_roundrect_ext(gold_x, gold_y, gold_x + gold_w, gold_y + gold_h, 6, 6, false);
-        draw_set_color(make_color_rgb(255, 215, 0));
-        draw_roundrect_ext(gold_x, gold_y, gold_x + gold_w, gold_y + gold_h, 6, 6, true);
+        ui_box(gold_x, gold_y, gold_x + gold_w, gold_y + gold_h, make_color_rgb(36, 30, 14), make_color_rgb(255, 215, 0), 6);
         
         // Small gold coin icon
         draw_set_color(make_color_rgb(255, 215, 0));
@@ -2610,20 +908,14 @@ function ui_draw_modals(state, mx, my) {
         var fav_w = mw - 60; // 1120px
         var fav_h = 54;
         
-        draw_set_color(make_color_rgb(32, 26, 18));
-        draw_roundrect_ext(fav_x, fav_y, fav_x + fav_w, fav_y + fav_h, 8, 8, false);
-        draw_set_color(make_color_rgb(255, 179, 0));
-        draw_roundrect_ext(fav_x, fav_y, fav_x + fav_w, fav_y + fav_h, 8, 8, true);
+        ui_box(fav_x, fav_y, fav_x + fav_w, fav_y + fav_h, make_color_rgb(32, 26, 18), make_color_rgb(255, 179, 0), 8);
         
         // Star badge pill on left
         var pill_w = 90;
         var pill_h = 32;
         var pill_x = fav_x + 12;
         var pill_y = fav_y + 11;
-        draw_set_color(make_color_rgb(64, 48, 14));
-        draw_roundrect_ext(pill_x, pill_y, pill_x + pill_w, pill_y + pill_h, 6, 6, false);
-        draw_set_color(make_color_rgb(255, 215, 0));
-        draw_roundrect_ext(pill_x, pill_y, pill_x + pill_w, pill_y + pill_h, 6, 6, true);
+        ui_box(pill_x, pill_y, pill_x + pill_w, pill_y + pill_h, make_color_rgb(64, 48, 14), make_color_rgb(255, 215, 0), 6);
         draw_set_halign(fa_center); draw_set_valign(fa_middle);
         draw_set_color(make_color_rgb(255, 215, 0));
         draw_text(pill_x + pill_w * 0.5, pill_y + pill_h * 0.5, "★ FAVOR");
@@ -2641,10 +933,7 @@ function ui_draw_modals(state, mx, my) {
         var bon_h = 32;
         var bon_x = fav_x + fav_w - 14 - bon_w;
         var bon_y = fav_y + 11;
-        draw_set_color(make_color_rgb(20, 48, 28));
-        draw_roundrect_ext(bon_x, bon_y, bon_x + bon_w, bon_y + bon_h, 6, 6, false);
-        draw_set_color(make_color_rgb(46, 204, 113));
-        draw_roundrect_ext(bon_x, bon_y, bon_x + bon_w, bon_y + bon_h, 6, 6, true);
+        ui_box(bon_x, bon_y, bon_x + bon_w, bon_y + bon_h, make_color_rgb(20, 48, 28), make_color_rgb(46, 204, 113), 6);
         draw_set_halign(fa_center); draw_set_valign(fa_middle);
         draw_set_color(make_color_rgb(105, 240, 174));
         draw_text(bon_x + bon_w * 0.5, bon_y + bon_h * 0.5, "+ " + string(cur_fav.bonus_gold) + "g EXTRA / ITEM");
@@ -2691,21 +980,11 @@ function ui_draw_modals(state, mx, my) {
             var r_mid_y = ry + row_h * 0.5;
             
             // Row Container
-            draw_set_color(is_favored ? make_color_rgb(34, 30, 20) : make_color_rgb(22, 28, 40));
-            draw_roundrect_ext(rx, ry, rx + row_w, ry + row_h, 8, 8, false);
-            draw_set_color(is_favored ? make_color_rgb(255, 179, 0) : make_color_rgb(46, 60, 80));
-            draw_roundrect_ext(rx, ry, rx + row_w, ry + row_h, 8, 8, true);
+            ui_box(rx, ry, rx + row_w, ry + row_h, is_favored ? make_color_rgb(34, 30, 20) : make_color_rgb(22, 28, 40), is_favored ? make_color_rgb(255, 179, 0) : make_color_rgb(46, 60, 80), 8);
             
             // 1. Resource Icon Token
             var ic_x = rx + 26;
-            draw_set_color(rdef.color);
-            draw_circle(ic_x, r_mid_y, 16, false);
-            draw_set_color(c_white);
-            draw_circle(ic_x, r_mid_y, 16, true);
-            
-            draw_set_halign(fa_center); draw_set_valign(fa_middle);
-            draw_set_color(c_white);
-            draw_text(ic_x, r_mid_y, rdef.icon_char);
+            ui_icon_resource(ic_x, r_mid_y, rk, 28);
             
             // 2. Resource Name
             draw_set_halign(fa_left); draw_set_valign(fa_middle);
@@ -2717,10 +996,7 @@ function ui_draw_modals(state, mx, my) {
                 var f_pill_x = rx + 54 + name_w + 12;
                 var f_pill_w = 68;
                 var f_pill_h = 20;
-                draw_set_color(make_color_rgb(58, 44, 14));
-                draw_roundrect_ext(f_pill_x, r_mid_y - 10, f_pill_x + f_pill_w, r_mid_y + 10, 4, 4, false);
-                draw_set_color(make_color_rgb(255, 193, 7));
-                draw_roundrect_ext(f_pill_x, r_mid_y - 10, f_pill_x + f_pill_w, r_mid_y + 10, 4, 4, true);
+                ui_box(f_pill_x, r_mid_y - 10, f_pill_x + f_pill_w, r_mid_y + 10, make_color_rgb(58, 44, 14), make_color_rgb(255, 193, 7), 4);
                 
                 draw_set_halign(fa_center); draw_set_valign(fa_middle);
                 draw_set_color(make_color_rgb(255, 225, 80));
@@ -2799,8 +1075,8 @@ function ui_draw_modals(state, mx, my) {
         // HEADER: TITLE & CORE HUD BADGES
         // -------------------------------------------------------------
         draw_set_halign(fa_center); draw_set_valign(fa_top);
-        draw_set_color(c_yellow);
-        draw_text(mx0 + mw * 0.5, my0 + 14, "DEFENSE WORKSTATION // BLUEPRINT FORGE & BASE REPAIR");
+        draw_set_color(C_AMBER);
+        ui_modal_title(mx0 + mw * 0.5, my0 + 10, "WORKSHOP  //  FORGE & REPAIR", C_AMBER);
         
         var cur_p = state.players[state.current_player_idx];
         var is_at_workstation = (cur_p.node == "workstation");
@@ -2815,10 +1091,7 @@ function ui_draw_modals(state, mx, my) {
         var st_x = mx0 + 30;
         var st_y = my0 + 44;
         
-        draw_set_color(is_at_workstation ? make_color_rgb(16, 38, 24) : make_color_rgb(38, 30, 14));
-        draw_roundrect_ext(st_x, st_y, st_x + st_w, st_y + st_h, 6, 6, false);
-        draw_set_color(is_at_workstation ? make_color_rgb(46, 204, 113) : make_color_rgb(243, 156, 18));
-        draw_roundrect_ext(st_x, st_y, st_x + st_w, st_y + st_h, 6, 6, true);
+        ui_box(st_x, st_y, st_x + st_w, st_y + st_h, is_at_workstation ? make_color_rgb(16, 38, 24) : make_color_rgb(38, 30, 14), is_at_workstation ? make_color_rgb(46, 204, 113) : make_color_rgb(243, 156, 18), 6);
         
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(is_at_workstation ? make_color_rgb(140, 240, 170) : make_color_rgb(255, 200, 80));
@@ -2831,10 +1104,7 @@ function ui_draw_modals(state, mx, my) {
         var pk_x = mx0 + 590;
         var pk_y = my0 + 44;
         
-        draw_set_color(make_color_rgb(20, 28, 40));
-        draw_roundrect_ext(pk_x, pk_y, pk_x + pk_w, pk_y + pk_h, 6, 6, false);
-        draw_set_color(is_engineer ? make_color_rgb(255, 215, 0) : make_color_rgb(66, 165, 245));
-        draw_roundrect_ext(pk_x, pk_y, pk_x + pk_w, pk_y + pk_h, 6, 6, true);
+        ui_box(pk_x, pk_y, pk_x + pk_w, pk_y + pk_h, make_color_rgb(20, 28, 40), is_engineer ? make_color_rgb(255, 215, 0) : make_color_rgb(66, 165, 245), 6);
         
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(is_engineer ? make_color_rgb(255, 235, 110) : make_color_rgb(170, 215, 255));
@@ -2857,10 +1127,7 @@ function ui_draw_modals(state, mx, my) {
         var view_h = 488;
         
         // Section Header Banner
-        draw_set_color(make_color_rgb(20, 28, 40));
-        draw_roundrect_ext(col1_x, my0 + 78, col1_x + col1_w, my0 + 104, 6, 6, false);
-        draw_set_color(make_color_rgb(46, 75, 105));
-        draw_roundrect_ext(col1_x, my0 + 78, col1_x + col1_w, my0 + 104, 6, 6, true);
+        ui_box(col1_x, my0 + 78, col1_x + col1_w, my0 + 104, make_color_rgb(20, 28, 40), make_color_rgb(46, 75, 105), 6);
         
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(make_color_rgb(100, 210, 255));
@@ -2874,14 +1141,11 @@ function ui_draw_modals(state, mx, my) {
         }
         
         if (num_bp == 0) {
-            draw_set_color(make_color_rgb(18, 24, 34));
-            draw_roundrect_ext(col1_x, view_y, col1_x + col1_w, view_y + view_h, 8, 8, false);
-            draw_set_color(make_color_rgb(45, 60, 80));
-            draw_roundrect_ext(col1_x, view_y, col1_x + col1_w, view_y + view_h, 8, 8, true);
+            ui_box(col1_x, view_y, col1_x + col1_w, view_y + view_h, make_color_rgb(18, 24, 34), make_color_rgb(45, 60, 80), 8);
             
             draw_set_halign(fa_center); draw_set_valign(fa_middle);
             draw_set_color(make_color_rgb(180, 200, 220));
-            draw_text_ext(col1_x + col1_w * 0.5, view_y + view_h * 0.5, "[No Blueprints Owned]\n\nVisit the Weapon Shop (south of Main Base) to purchase\nweapon blueprints using Gold.\n\nOnce acquired, bring them here to spend raw materials\nand forge them directly onto Towers 1-4!", 22, col1_w - 40);
+            ui_text_ext(col1_x + col1_w * 0.5, view_y + view_h * 0.5, "[No Blueprints Owned]\n\nVisit the Weapon Shop (south of Main Base) to purchase\nweapon blueprints using Gold.\n\nOnce acquired, bring them here to spend raw materials\nand forge them directly onto Towers 1-4!", 22, col1_w - 40);
         } else {
             var total_bp_h = num_bp * 160;
             var max_scroll = max(0, total_bp_h - view_h);
@@ -2902,10 +1166,7 @@ function ui_draw_modals(state, mx, my) {
             draw_clear_alpha(c_black, 0);
             
             // Background box for surface
-            draw_set_color(make_color_rgb(18, 24, 34));
-            draw_roundrect_ext(0, 0, surf_w, surf_h, 8, 8, false);
-            draw_set_color(make_color_rgb(45, 60, 80));
-            draw_roundrect_ext(0, 0, surf_w, surf_h, 8, 8, true);
+            ui_box(0, 0, surf_w, surf_h, make_color_rgb(18, 24, 34), make_color_rgb(45, 60, 80), 8);
             
             var in_view = (mx >= col1_x && mx <= col1_x + col1_w && my >= view_y && my <= view_y + view_h);
             var local_mx = in_view ? (mx - col1_x) : -9999;
@@ -2921,14 +1182,11 @@ function ui_draw_modals(state, mx, my) {
                 // Cull invisible cards
                 if (bpy + bp_h < 0 || bpy > surf_h) continue;
                 
-                draw_set_color(make_color_rgb(22, 28, 40));
-                draw_roundrect_ext(4, bpy, 4 + card_inner_w, bpy + bp_h, 8, 8, false);
-                draw_set_color(make_color_rgb(52, 73, 94));
-                draw_roundrect_ext(4, bpy, 4 + card_inner_w, bpy + bp_h, 8, 8, true);
+                ui_box(4, bpy, 4 + card_inner_w, bpy + bp_h, make_color_rgb(22, 28, 40), make_color_rgb(52, 73, 94), 8);
                 
                 // Name & Stats
                 draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color(c_yellow);
+                draw_set_color(C_AMBER);
                 draw_text(18, bpy + 16, bp.name);
                 
                 // Stats Plate (HP, Dmg, Targets)
@@ -2961,7 +1219,7 @@ function ui_draw_modals(state, mx, my) {
                 
                 // Ability
                 draw_set_color(make_color_rgb(180, 205, 230));
-                draw_text_ext(18, bpy + 62, bp.ability, 16, card_inner_w - 24);
+                ui_text_ext(18, bpy + 62, bp.ability, 16, card_inner_w - 24);
                 
                 // Mount Buttons (T1, T2, T3, T4)
                 var can_craft_base = (is_at_workstation && cur_p.energy >= task_cost && has_all_mats);
@@ -3040,10 +1298,7 @@ function ui_draw_modals(state, mx, my) {
         var col2_w = 550;
         
         // Section Header Banner: Base Towers
-        draw_set_color(make_color_rgb(20, 28, 40));
-        draw_roundrect_ext(col2_x, my0 + 78, col2_x + col2_w, my0 + 104, 6, 6, false);
-        draw_set_color(make_color_rgb(46, 75, 105));
-        draw_roundrect_ext(col2_x, my0 + 78, col2_x + col2_w, my0 + 104, 6, 6, true);
+        ui_box(col2_x, my0 + 78, col2_x + col2_w, my0 + 104, make_color_rgb(20, 28, 40), make_color_rgb(46, 75, 105), 6);
         
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(make_color_rgb(100, 210, 255));
@@ -3059,10 +1314,7 @@ function ui_draw_modals(state, mx, my) {
             var r_mid = r_row_y + rep_row_h * 0.5;
             
             // Tower Row Card
-            draw_set_color(make_color_rgb(22, 28, 40));
-            draw_roundrect_ext(col2_x, r_row_y, col2_x + col2_w, r_row_y + rep_row_h, 6, 6, false);
-            draw_set_color(make_color_rgb(46, 60, 80));
-            draw_roundrect_ext(col2_x, r_row_y, col2_x + col2_w, r_row_y + rep_row_h, 6, 6, true);
+            ui_box(col2_x, r_row_y, col2_x + col2_w, r_row_y + rep_row_h, make_color_rgb(22, 28, 40), make_color_rgb(46, 60, 80), 6);
             
             // Blue Heart Icon
             ui_draw_heart(col2_x + 18, r_mid, 11, tow.alive ? make_color_rgb(33, 150, 243) : make_color_rgb(90, 90, 90));
@@ -3085,7 +1337,7 @@ function ui_draw_modals(state, mx, my) {
             var bhov1 = ui_draw_button(b1_x, b1_y, b1_w, b1_h, "", can_rep1, false, mx, my);
             
             draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(can_rep1 ? (bhov1 ? c_yellow : make_color_rgb(120, 240, 150)) : make_color_rgb(140, 140, 140));
+            draw_set_color(can_rep1 ? (bhov1 ? C_AMBER : make_color_rgb(120, 240, 150)) : make_color_rgb(140, 140, 140));
             draw_text(b1_x + 10, r_mid, "+1 HP");
             draw_set_color(can_rep1 ? c_white : make_color_rgb(140, 140, 140));
             draw_text(b1_x + 60, r_mid, "1");
@@ -3110,7 +1362,7 @@ function ui_draw_modals(state, mx, my) {
             var bhov3 = ui_draw_button(b2_x, b2_y, b2_w, b2_h, "", can_rep3, false, mx, my);
             
             draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(can_rep3 ? (bhov3 ? c_yellow : make_color_rgb(100, 220, 255)) : make_color_rgb(140, 140, 140));
+            draw_set_color(can_rep3 ? (bhov3 ? C_AMBER : make_color_rgb(100, 220, 255)) : make_color_rgb(140, 140, 140));
             draw_text(b2_x + 10, r_mid, "+3 HP");
             draw_set_color(can_rep3 ? c_white : make_color_rgb(140, 140, 140));
             draw_text(b2_x + 60, r_mid, "1");
@@ -3135,10 +1387,7 @@ function ui_draw_modals(state, mx, my) {
         
         // Mounted Weapons Section Header
         var wep_sec_y = my0 + 322;
-        draw_set_color(make_color_rgb(20, 28, 40));
-        draw_roundrect_ext(col2_x, wep_sec_y, col2_x + col2_w, wep_sec_y + 26, 6, 6, false);
-        draw_set_color(make_color_rgb(46, 75, 105));
-        draw_roundrect_ext(col2_x, wep_sec_y, col2_x + col2_w, wep_sec_y + 26, 6, 6, true);
+        ui_box(col2_x, wep_sec_y, col2_x + col2_w, wep_sec_y + 26, make_color_rgb(20, 28, 40), make_color_rgb(46, 75, 105), 6);
         
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(make_color_rgb(100, 210, 255));
@@ -3155,10 +1404,7 @@ function ui_draw_modals(state, mx, my) {
                 wep_count++;
                 
                 // Weapon Card
-                draw_set_color(make_color_rgb(22, 28, 40));
-                draw_roundrect_ext(col2_x, wy_row, col2_x + col2_w, wy_row + 40, 6, 6, false);
-                draw_set_color(make_color_rgb(46, 60, 80));
-                draw_roundrect_ext(col2_x, wy_row, col2_x + col2_w, wy_row + 40, 6, 6, true);
+                ui_box(col2_x, wy_row, col2_x + col2_w, wy_row + 40, make_color_rgb(22, 28, 40), make_color_rgb(46, 60, 80), 6);
                 
                 // Red heart
                 ui_draw_heart(col2_x + 18, w_mid, 11, make_color_rgb(231, 76, 60));
@@ -3179,7 +1425,7 @@ function ui_draw_modals(state, mx, my) {
                 var bhov_w = ui_draw_button(bw_x, bw_y, bw_w, bw_h, "", can_wrep, false, mx, my);
                 
                 draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color(can_wrep ? (bhov_w ? c_yellow : make_color_rgb(120, 240, 150)) : make_color_rgb(140, 140, 140));
+                draw_set_color(can_wrep ? (bhov_w ? C_AMBER : make_color_rgb(120, 240, 150)) : make_color_rgb(140, 140, 140));
                 draw_text(bw_x + 10, w_mid, "+2 HP (1x:");
                 var rnames = variable_struct_get_names(wep.cost_res);
                 var r_cnt = min(3, array_length(rnames));
@@ -3205,10 +1451,7 @@ function ui_draw_modals(state, mx, my) {
             }
         }
         if (wep_count == 0) {
-            draw_set_color(make_color_rgb(18, 24, 34));
-            draw_roundrect_ext(col2_x, wy, col2_x + col2_w, wy + 80, 6, 6, false);
-            draw_set_color(make_color_rgb(45, 60, 80));
-            draw_roundrect_ext(col2_x, wy, col2_x + col2_w, wy + 80, 6, 6, true);
+            ui_box(col2_x, wy, col2_x + col2_w, wy + 80, make_color_rgb(18, 24, 34), make_color_rgb(45, 60, 80), 6);
             
             draw_set_halign(fa_center); draw_set_valign(fa_middle);
             draw_set_color(make_color_rgb(140, 155, 175));
@@ -3223,42 +1466,14 @@ function ui_draw_modals(state, mx, my) {
         draw_text(mx0 + mw * 0.5, my0 + mh - 20, "Base fortifications and defenses can only be repaired while stationed at the Workstation area.");
     }
     else if (m.type == "victory" || state.phase == "victory") {
-        draw_set_halign(fa_center); draw_set_valign(fa_top);
-        draw_set_color(make_color_rgb(46, 204, 113));
-        draw_text(mx0 + mw * 0.5, my0 + 40, "VICTORY! HUMANITY SURVIVED!");
-        
-        draw_set_color(c_white);
-        draw_text(mx0 + mw * 0.5, my0 + 100, "You defended the base through all 17 waves of the alien invasion!\nEarth is reclaiming its future thanks to your teamwork and tactical defenses.");
-        
-        var btn_w = 400;
-        var btn_h = 48;
-        var btn_x = mx0 + (mw - btn_w) * 0.5;
-        
-        state.victory_endless_hover = ui_draw_button(btn_x, my0 + 240, btn_w, btn_h, "Continue to Endless Mode", true, false, mx, my);
-        state.victory_restart_hover = ui_draw_button(btn_x, my0 + 305, btn_w, btn_h, "Start New Game", true, true, mx, my);
-        state.victory_exit_hover = ui_draw_button(btn_x, my0 + 370, btn_w, btn_h, "Exit to Desktop", true, false, mx, my);
+        ui_draw_end_screen(state, mx, my, mx0, my0, mw, mh, true);
     }
     else if (m.type == "game_over" || state.phase == "game_over") {
-        draw_set_halign(fa_center); draw_set_valign(fa_top);
-        draw_set_color(make_color_rgb(231, 76, 60));
-        draw_text(mx0 + mw * 0.5, my0 + 35, "MISSION FAILED // ALL TOWERS DESTROYED");
-        
-        draw_set_color(make_color_rgb(255, 110, 110));
-        draw_text(mx0 + mw * 0.5, my0 + 72, "YOU LOST");
-        
-        draw_set_color(c_white);
-        draw_text(mx0 + mw * 0.5, my0 + 115, "All four defensive towers have been wiped out by the alien swarm.\nThe base defenses were breached and humanity has been overrun.\n\nSurviving Waves Defended: " + string(state.round_number - 1));
-        
-        var btn_w = 380;
-        var btn_h = 48;
-        var btn_x = mx0 + (mw - btn_w) * 0.5;
-        
-        state.gameover_restart_hover = ui_draw_button(btn_x, my0 + 250, btn_w, btn_h, "Play Again (Start New Game)", true, true, mx, my);
-        state.gameover_quit_hover = ui_draw_button(btn_x, my0 + 315, btn_w, btn_h, "Close Game (Exit to Desktop)", true, false, mx, my);
+        ui_draw_end_screen(state, mx, my, mx0, my0, mw, mh, false);
     }
     else if (m.type == "player_setup") {
         draw_set_halign(fa_center); draw_set_valign(fa_top);
-        draw_set_color(c_yellow);
+        draw_set_color(C_AMBER);
         draw_text(mx0 + mw * 0.5, my0 + 16, "STRIKE TEAM DEPLOYMENT // OPERATIVE SETUP");
         
         draw_set_color(make_color_rgb(180, 200, 220));
@@ -3307,10 +1522,7 @@ function ui_draw_modals(state, mx, my) {
             var ry = row_y0 + p * (row_h + row_spacing);
             
             // Operative card background & color border
-            draw_set_color(make_color_rgb(26, 33, 46));
-            draw_roundrect_ext(row_x, ry, row_x + row_w, ry + row_h, 8, 8, false);
-            draw_set_color(p_colors[p]);
-            draw_roundrect_ext(row_x, ry, row_x + row_w, ry + row_h, 8, 8, true);
+            ui_box(row_x, ry, row_x + row_w, ry + row_h, make_color_rgb(26, 33, 46), p_colors[p], 8);
             
             // Editable Player Name Box
             var name_bx = row_x + 12;
@@ -3326,13 +1538,10 @@ function ui_draw_modals(state, mx, my) {
             draw_set_color(p_colors[p]);
             draw_text(name_bx, ry + 7, "Operative " + string(p + 1) + ":");
             
-            draw_set_color(is_editing ? make_color_rgb(42, 52, 72) : (name_hov ? make_color_rgb(32, 42, 58) : make_color_rgb(18, 24, 34)));
-            draw_roundrect_ext(name_bx, name_by, name_bx + name_bw, name_by + name_bh, 6, 6, false);
-            draw_set_color(is_editing ? c_yellow : (name_hov ? c_white : make_color_rgb(80, 100, 130)));
-            draw_roundrect_ext(name_bx, name_by, name_bx + name_bw, name_by + name_bh, 6, 6, true);
+            ui_box(name_bx, name_by, name_bx + name_bw, name_by + name_bh, is_editing ? make_color_rgb(42, 52, 72) : (name_hov ? make_color_rgb(32, 42, 58) : make_color_rgb(18, 24, 34)), is_editing ? C_AMBER : (name_hov ? c_white : make_color_rgb(80, 100, 130)), 6);
             
             draw_set_valign(fa_middle);
-            draw_set_color(is_editing ? c_yellow : c_white);
+            draw_set_color(is_editing ? C_AMBER : c_white);
             var disp_name = state.setup_player_names[p];
             if (is_editing) {
                 var cursor_bar = (state.name_cursor_timer % 30 < 15) ? "|" : "";
@@ -3362,10 +1571,7 @@ function ui_draw_modals(state, mx, my) {
             var info_h = row_h - 16;
             
             // Background box for the info section
-            draw_set_color(make_color_rgb(18, 23, 33));
-            draw_roundrect_ext(info_x, info_y, info_x + info_w, info_y + info_h, 6, 6, false);
-            draw_set_color(make_color_rgb(52, 70, 95));
-            draw_roundrect_ext(info_x, info_y, info_x + info_w, info_y + info_h, 6, 6, true);
+            ui_box(info_x, info_y, info_x + info_w, info_y + info_h, make_color_rgb(18, 23, 33), make_color_rgb(52, 70, 95), 6);
             
             var p_scaled_e = game_calculate_player_max_energy(cur_class, state.setup_player_count, 0);
             var title_str = cur_class.role + " (" + string(p_scaled_e) + " Energy)  [" + cur_class.perk_tag + "]";
@@ -3415,7 +1621,7 @@ function ui_draw_modals(state, mx, my) {
             var sx = 6 - state.setup_scroll_x[p];
             
             // Role Title & Tag
-            draw_set_color(c_yellow);
+            draw_set_color(C_AMBER);
             draw_text(sx, 4, title_str);
             
             // Role Description
@@ -3436,108 +1642,7 @@ function ui_draw_modals(state, mx, my) {
         state.setup_start_hover = ui_draw_button(start_btn_x, start_btn_y, start_btn_w, start_btn_h, "DEPLOY STRIKE TEAM (START MISSION)", true, true, mx, my);
     }
     else if (m.type == "settings") {
-        draw_set_halign(fa_center); draw_set_valign(fa_top);
-        draw_set_color(c_yellow);
-        draw_text(mx0 + mw * 0.5, my0 + 25, "SYSTEM & DISPLAY SETTINGS");
-        
-        // -------------------------------------------------------------
-        // 1. DISPLAY MODE PICKER (Borderless vs Fullscreen vs Windowed)
-        // -------------------------------------------------------------
-        draw_set_halign(fa_left);
-        draw_set_color(c_white);
-        draw_text(mx0 + 40, my0 + 70, "DISPLAY MODE:");
-        
-        var cur_mode = state.settings.display_mode;
-        var btn_w = 235;
-        var btn_h = 38;
-        var b_y = my0 + 100;
-        
-        var is_borderless = (cur_mode == "borderless");
-        var is_fullscreen = (cur_mode == "fullscreen");
-        var is_windowed = (cur_mode == "windowed");
-        
-        state.settings_mode_borderless_hover = ui_draw_button(mx0 + 40, b_y, btn_w, btn_h, "Borderless (Default)", true, is_borderless, mx, my);
-        state.settings_mode_fullscreen_hover = ui_draw_button(mx0 + 295, b_y, btn_w, btn_h, "Exclusive Fullscreen", true, is_fullscreen, mx, my);
-        state.settings_mode_windowed_hover = ui_draw_button(mx0 + 550, b_y, btn_w, btn_h, "Windowed Mode", true, is_windowed, mx, my);
-        
-        // -------------------------------------------------------------
-        // 2. RESOLUTION PICKER
-        // -------------------------------------------------------------
-        draw_set_color(c_white);
-        draw_text(mx0 + 40, my0 + 165, "RESOLUTION (Windowed & Target Scale):");
-        
-        var res_y = my0 + 195;
-        var res_w = 175;
-        var res_h = 36;
-        state.settings_res_hover = -1;
-        
-        for (var r = 0; r < array_length(state.resolutions); r++) {
-            var rx = mx0 + 40 + r * (res_w + 18);
-            var is_active_res = (state.settings.resolution_idx == r);
-            var r_label = state.resolutions[r][2];
-            var r_hov = ui_draw_button(rx, res_y, res_w, res_h, r_label, true, is_active_res, mx, my);
-            if (r_hov) {
-                state.settings_res_hover = r;
-            }
-        }
-        
-        // -------------------------------------------------------------
-        // 3. SOUND EFFECT VOLUME SLIDER
-        // -------------------------------------------------------------
-        draw_set_color(c_white);
-        draw_text(mx0 + 40, my0 + 265, "SOUND EFFECT VOLUME:");
-        
-        var vol_pct = round(state.settings.sfx_volume * 100);
-        draw_set_halign(fa_right);
-        draw_set_color(c_yellow);
-        draw_text(mx0 + mw - 200, my0 + 265, string(vol_pct) + "%");
-        draw_set_halign(fa_left);
-        
-        // Track
-        var track_x = mx0 + 40;
-        var track_y = my0 + 295;
-        var track_w = mw - 250;
-        var track_h = 18;
-        
-        // Background track bar
-        draw_set_color(make_color_rgb(33, 43, 54));
-        draw_roundrect_ext(track_x, track_y, track_x + track_w, track_y + track_h, 8, 8, false);
-        draw_set_color(make_color_rgb(74, 85, 104));
-        draw_roundrect_ext(track_x, track_y, track_x + track_w, track_y + track_h, 8, 8, true);
-        
-        // Fill bar
-        var fill_w = track_w * clamp(state.settings.sfx_volume, 0.0, 1.0);
-        if (fill_w > 0) {
-            draw_set_color(make_color_rgb(46, 204, 113));
-            draw_roundrect_ext(track_x, track_y, track_x + fill_w, track_y + track_h, 8, 8, false);
-        }
-        
-        // Slider Thumb handle
-        var thumb_x = track_x + fill_w;
-        var thumb_y = track_y + track_h * 0.5;
-        var thumb_rad = 12;
-        var thumb_hover = point_in_circle(mx, my, thumb_x, thumb_y, thumb_rad + 4);
-        
-        draw_set_color(c_black);
-        draw_circle(thumb_x, thumb_y, thumb_rad + 2, false);
-        draw_set_color(thumb_hover ? c_yellow : c_white);
-        draw_circle(thumb_x, thumb_y, thumb_rad, false);
-        draw_set_color(c_black);
-        draw_circle(thumb_x, thumb_y, thumb_rad, true);
-        
-        // Test SFX Button
-        state.settings_test_sfx_hover = ui_draw_button(track_x + track_w + 30, track_y - 8, 140, 34, "Play Test SFX", true, false, mx, my);
-        
-        // -------------------------------------------------------------
-        // 4. CURRENT STATUS & DONE BUTTON
-        // -------------------------------------------------------------
-        draw_set_color(make_color_rgb(160, 185, 210));
-        var active_res_str = string(state.resolutions[state.settings.resolution_idx][0]) + " x " + string(state.resolutions[state.settings.resolution_idx][1]);
-        draw_text(mx0 + 40, my0 + 360, "Active Display: " + string_upper(cur_mode) + "  |  Resolution: " + active_res_str + "  |  SFX: " + string(vol_pct) + "%");
-        
-        // Buttons: Restart Game & Apply / Close
-        state.settings_restart_hover = ui_draw_button(mx0 + 40, my0 + 420, 340, 44, "Restart Game (New Mission)", true, false, mx, my);
-        state.settings_close_hover = ui_draw_button(mx0 + mw - 380, my0 + 420, 340, 44, "Apply & Close", true, true, mx, my);
+        ui_draw_settings(state, mx, my, mx0, my0, mw, mh);
     }
 }
 
@@ -3551,15 +1656,11 @@ function ui_draw_screen_starfield(state) {
     draw_set_color(make_color_rgb(10, 14, 22));
     draw_rectangle(0, 0, 1920, 1080, false);
     
-    // Ambient cosmic nebula glows
-    draw_set_alpha(0.08);
-    draw_set_color(make_color_rgb(41, 128, 185));
-    draw_circle(450, 320, 380, false);
-    draw_set_color(make_color_rgb(142, 68, 173));
-    draw_circle(1480, 720, 440, false);
-    draw_set_color(make_color_rgb(22, 160, 133));
-    draw_circle(960, 540, 300, false);
-    draw_set_alpha(1.0);
+    // Ambient nebula glows (smooth radial gradients that drift slowly)
+    var nt = current_time / 1000;
+    ui_glow(450 + sin(nt * 0.05) * 40, 320, 620, make_color_rgb(30, 90, 160), 0.35);
+    ui_glow(1480, 700 + cos(nt * 0.04) * 30, 700, make_color_rgb(110, 50, 150), 0.28);
+    ui_glow(960, 540, 420, make_color_rgb(16, 110, 110), 0.18);
     
     // Subtle sci-fi background grid
     draw_set_alpha(0.04);
@@ -3674,141 +1775,132 @@ function ui_draw_class_emblem(ex, ey, class_id, p_color, is_large = false) {
     }
 }
 
-/// @desc Draws stylized Title Screen for "Alien game"
+/// @desc Title screen: animated planet horizon, glowing logo and a keyboard/mouse menu
 function ui_draw_title_screen(state, mx, my) {
     ui_draw_screen_starfield(state);
-    
-    // Main Title Branding Box
-    var title_cx = 960;
-    var title_cy = 230;
-    
-    // Glowing cyan laser header line
-    draw_set_color(make_color_rgb(0, 229, 255));
-    draw_line_width(title_cx - 420, title_cy - 75, title_cx + 420, title_cy - 75, 2);
-    draw_circle(title_cx - 420, title_cy - 75, 4, false);
-    draw_circle(title_cx + 420, title_cy - 75, 4, false);
-    
-    draw_set_halign(fa_center); draw_set_valign(fa_middle);
-    
-    // Top Sub-header
-    draw_set_color(make_color_rgb(100, 181, 246));
-    draw_text(title_cx, title_cy - 50, "// PLANETARY OUTPOST PROTOCOL // TACTICAL CO-OP DEFENSE //");
-    
-    // Massive Stylized Title: "Alien game"
-    var title_text = "Alien game";
-    
-    // Drop shadow
-    draw_set_color(make_color_rgb(10, 20, 35));
-    draw_text_transformed(title_cx + 4, title_cy + 18, title_text, 3.8, 3.8, 0);
-    draw_text_transformed(title_cx + 2, title_cy + 16, title_text, 3.8, 3.8, 0);
-    
-    // Outer Cyan Glow
-    draw_set_color(make_color_rgb(0, 180, 216));
-    draw_text_transformed(title_cx - 1, title_cy + 14, title_text, 3.8, 3.8, 0);
-    draw_text_transformed(title_cx + 1, title_cy + 14, title_text, 3.8, 3.8, 0);
-    
-    // Crisp Core Title Text
+    var t = current_time / 1000;
+
+    // Planet horizon with atmosphere glow
+    var pcx = 1300, pcy = 2050, pr = 1250;
+    // Atmosphere: gradient band hugging the horizon
+    draw_primitive_begin(pr_trianglestrip);
+    for (var ang = 40; ang <= 140; ang += 1.5) {
+        draw_vertex_color(pcx + lengthdir_x(pr + 150, ang), pcy + lengthdir_y(pr + 150, ang), make_color_rgb(40, 120, 220), 0);
+        draw_vertex_color(pcx + lengthdir_x(pr, ang), pcy + lengthdir_y(pr, ang), make_color_rgb(60, 150, 255), 0.35);
+    }
+    draw_primitive_end();
+    // Planet body as a finely tessellated arc so the horizon stays perfectly smooth
+    draw_set_color(make_color_rgb(9, 15, 26));
+    draw_primitive_begin(pr_trianglefan);
+    draw_vertex(pcx, pcy);
+    for (var ang = 30; ang <= 150; ang += 1) draw_vertex(pcx + lengthdir_x(pr, ang), pcy + lengthdir_y(pr, ang));
+    draw_primitive_end();
+    draw_set_color(make_color_rgb(90, 180, 255));
+    for (var ang = 30; ang < 150; ang += 1) {
+        draw_line_width(pcx + lengthdir_x(pr, ang), pcy + lengthdir_y(pr, ang), pcx + lengthdir_x(pr, ang + 1), pcy + lengthdir_y(pr, ang + 1), 2);
+    }
+    // Outpost silhouette on the horizon with blinking beacons
+    var ox = 1460, oy = pcy - pr + 2;
+    draw_set_color(make_color_rgb(6, 10, 16));
+    draw_rectangle(ox - 120, oy - 40, ox - 70, oy + 20, false);
+    draw_rectangle(ox - 60, oy - 70, ox - 30, oy + 20, false);
+    draw_rectangle(ox - 20, oy - 30, ox + 80, oy + 20, false);
+    draw_triangle(ox - 70, oy - 70, ox - 20, oy - 70, ox - 45, oy - 100, false);
+    draw_rectangle(ox + 90, oy - 55, ox + 110, oy + 20, false);
+    var blink = (frac(t * 0.7) < 0.5);
+    draw_set_color(blink ? make_color_rgb(255, 80, 80) : make_color_rgb(90, 30, 30));
+    draw_circle(ox - 45, oy - 102, 3, false);
+    draw_set_color(make_color_rgb(120, 220, 255));
+    draw_circle(ox + 100, oy - 58, 2, false);
+    // Distant swarm silhouettes drifting over the planet
+    for (var i = 0; i < 7; i++) {
+        var sx = 1920 - ((t * (18 + i * 4) + i * 260) mod 2200) + 140;
+        var sy = 520 + i * 34 + sin(t * 1.3 + i) * 12;
+        draw_set_alpha(0.35);
+        ui_draw_alien_glyph(sx, sy, (i mod 3 == 0) ? "drooper" : "drone", 1 + (i mod 3), 22 + (i mod 3) * 6, t + i, 0);
+        draw_set_alpha(1);
+    }
+
+    // Logo
+    var lx = 160, ly = 210;
+    var intro = 1 - (state[$ "transition"] ?? 0);
+    draw_set_font(fnt_small);
+    draw_set_halign(fa_left); draw_set_valign(fa_middle);
+    draw_set_color(C_ACCENT);
+    draw_text(lx + 4, ly - 82, "CO-OP OUTPOST DEFENSE   //   1-4 OPERATIVES   //   LOCAL & LAN");
+    draw_set_color(C_ACCENT);
+    draw_line_width(lx, ly - 64, lx + 120 * intro + 520, ly - 64, 2);
+    draw_set_font(fnt_title);
+    ui_glow(lx + 360, ly + 10, 260, C_ACCENT, 0.12 + 0.04 * sin(t * 2));
+    draw_set_alpha(0.6);
+    draw_set_color(C_ACCENT_D);
+    draw_text(lx + 4, ly + 6, "ALIEN GAME");
+    draw_set_alpha(1);
     draw_set_color(c_white);
-    draw_text_transformed(title_cx, title_cy + 14, title_text, 3.8, 3.8, 0);
-    
-    // Edition Tag
-    draw_set_color(make_color_rgb(255, 215, 0));
-    draw_text(title_cx, title_cy + 75, "-- LOCAL WI-FI MULTIPLAYER & SQUAD DEFENSE --");
-    
-    draw_set_color(make_color_rgb(0, 229, 255));
-    draw_line_width(title_cx - 420, title_cy + 95, title_cx + 420, title_cy + 95, 2);
-    draw_circle(title_cx - 420, title_cy + 95, 4, false);
-    draw_circle(title_cx + 420, title_cy + 95, 4, false);
-    
-    // Menu Container Box
-    var box_w = 540;
-    var box_h = 440;
-    var box_x = title_cx - box_w * 0.5;
-    var box_y = 420;
-    
-    draw_set_color(make_color_rgb(18, 24, 36));
-    draw_roundrect_ext(box_x, box_y, box_x + box_w, box_y + box_h, 14, 14, false);
-    draw_set_color(make_color_rgb(45, 60, 85));
-    draw_roundrect_ext(box_x, box_y, box_x + box_w, box_y + box_h, 14, 14, true);
-    
-    // Corner brackets
-    draw_set_color(make_color_rgb(0, 229, 255));
-    draw_line_width(box_x, box_y + 24, box_x, box_y, 3);
-    draw_line_width(box_x, box_y, box_x + 24, box_y, 3);
-    draw_line_width(box_x + box_w, box_y + 24, box_x + box_w, box_y, 3);
-    draw_line_width(box_x + box_w - 24, box_y, box_x + box_w, box_y, 3);
-    draw_line_width(box_x, box_y + box_h - 24, box_x, box_y + box_h, 3);
-    draw_line_width(box_x, box_y + box_h, box_x + 24, box_y + box_h, 3);
-    draw_line_width(box_x + box_w, box_y + box_h - 24, box_x + box_w, box_y + box_h, 3);
-    draw_line_width(box_x + box_w - 24, box_y + box_h, box_x + box_w, box_y + box_h, 3);
-    
-    // Menu Buttons
-    var btn_w = 460;
-    var btn_h = 68;
-    var btn_x = title_cx - btn_w * 0.5;
-    var btn_spacing = 18;
-    var start_btn_y = box_y + 42;
-    
-    // 1. Local Play Button
-    var by1 = start_btn_y;
-    var hov1 = ui_point_in_rect(mx, my, btn_x, by1, btn_w, btn_h);
-    state.title_btn_local_hover = hov1;
-    draw_set_color(hov1 ? make_color_rgb(38, 55, 82) : make_color_rgb(26, 36, 52));
-    draw_roundrect_ext(btn_x, by1, btn_x + btn_w, by1 + btn_h, 8, 8, false);
-    draw_set_color(hov1 ? c_yellow : make_color_rgb(64, 90, 125));
-    draw_roundrect_ext(btn_x, by1, btn_x + btn_w, by1 + btn_h, 8, 8, true);
-    
-    draw_set_halign(fa_center); draw_set_valign(fa_middle);
-    draw_set_color(hov1 ? c_yellow : c_white);
-    draw_text_transformed(title_cx, by1 + 22, "LOCAL PLAY", 1.25, 1.25, 0);
-    draw_set_color(hov1 ? make_color_rgb(220, 220, 220) : make_color_rgb(140, 160, 180));
-    draw_text(title_cx, by1 + 48, "1 - 4 Local Operatives on this Machine");
-    
-    // 2. Online Wi-Fi Multiplayer Button
-    var by2 = by1 + btn_h + btn_spacing;
-    var hov2 = ui_point_in_rect(mx, my, btn_x, by2, btn_w, btn_h);
-    state.title_btn_online_hover = hov2;
-    draw_set_color(hov2 ? make_color_rgb(22, 60, 75) : make_color_rgb(20, 42, 56));
-    draw_roundrect_ext(btn_x, by2, btn_x + btn_w, by2 + btn_h, 8, 8, false);
-    draw_set_color(hov2 ? make_color_rgb(0, 229, 255) : make_color_rgb(38, 110, 140));
-    draw_roundrect_ext(btn_x, by2, btn_x + btn_w, by2 + btn_h, 8, 8, true);
-    
-    draw_set_color(hov2 ? make_color_rgb(0, 229, 255) : c_white);
-    draw_text_transformed(title_cx, by2 + 22, "ONLINE (LOCAL WI-FI)", 1.25, 1.25, 0);
-    draw_set_color(hov2 ? make_color_rgb(200, 245, 255) : make_color_rgb(120, 175, 195));
-    draw_text(title_cx, by2 + 48, "Create or Join Public Rooms with Players on Same Wi-Fi");
-    
-    // 3. Settings Button
-    var by3 = by2 + btn_h + btn_spacing;
-    var hov3 = ui_point_in_rect(mx, my, btn_x, by3, btn_w, btn_h);
-    state.title_btn_settings_hover = hov3;
-    draw_set_color(hov3 ? make_color_rgb(44, 52, 68) : make_color_rgb(28, 34, 46));
-    draw_roundrect_ext(btn_x, by3, btn_x + btn_w, by3 + btn_h, 8, 8, false);
-    draw_set_color(hov3 ? c_white : make_color_rgb(70, 85, 110));
-    draw_roundrect_ext(btn_x, by3, btn_x + btn_w, by3 + btn_h, 8, 8, true);
-    
-    draw_set_color(hov3 ? c_yellow : c_white);
-    draw_text_transformed(title_cx, by3 + 22, "SETTINGS", 1.2, 1.2, 0);
-    draw_set_color(make_color_rgb(140, 155, 175));
-    draw_text(title_cx, by3 + 48, "Display Mode, Resolution & SFX Volume");
-    
-    // 4. Exit to Desktop Button
-    var by4 = by3 + btn_h + btn_spacing;
-    var hov4 = ui_point_in_rect(mx, my, btn_x, by4, btn_w, btn_h);
-    state.title_btn_quit_hover = hov4;
-    draw_set_color(hov4 ? make_color_rgb(60, 30, 30) : make_color_rgb(38, 24, 28));
-    draw_roundrect_ext(btn_x, by4, btn_x + btn_w, by4 + btn_h, 8, 8, false);
-    draw_set_color(hov4 ? make_color_rgb(255, 82, 82) : make_color_rgb(110, 50, 55));
-    draw_roundrect_ext(btn_x, by4, btn_x + btn_w, by4 + btn_h, 8, 8, true);
-    
-    draw_set_color(hov4 ? make_color_rgb(255, 100, 100) : make_color_rgb(220, 180, 180));
-    draw_text_transformed(title_cx, by4 + 22, "EXIT TO DESKTOP", 1.15, 1.15, 0);
-    draw_set_color(make_color_rgb(150, 120, 120));
-    draw_text(title_cx, by4 + 48, "Quit Application");
-    
-    // Footer Information
-    draw_set_color(make_color_rgb(90, 110, 140));
-    draw_text(title_cx, 1020, "Local Wi-Fi Subnet Broadcast (Ports 6510/6511)  |  Press F11 for Fullscreen");
+    draw_text(lx, ly, "ALIEN GAME");
+    draw_set_font(fnt_h2);
+    draw_set_color(C_AMBER);
+    draw_text(lx + 6, ly + 74, "HOLD THE OUTPOST FOR 17 DAYS");
+
+    // Menu
+    var items = [
+        ["PLAY LOCAL", "1-4 operatives sharing this screen"],
+        ["PLAY ON LAN", "Host or join a squad on your Wi-Fi network"],
+        ["HOW TO PLAY", "Rules and controls"],
+        ["SETTINGS", "Display, audio and gameplay options"],
+        ["QUIT", "Exit to desktop"]
+    ];
+    var my0 = 430, bh = 70;
+    state.title_hover = -1;
+    state.title_btn_local_hover = false; state.title_btn_online_hover = false; state.title_btn_settings_hover = false; state.title_btn_quit_hover = false;
+    for (var i = 0; i < array_length(items); i++) {
+        var by = my0 + i * (bh + 6);
+        var hov = ui_point_in_rect(mx, my, lx - 20, by, 560, bh);
+        if (hov && is_undefined(state.modal)) {
+            state.title_hover = i;
+            state.title_sel = i;
+        }
+        var sel = (state[$ "title_sel"] ?? 0) == i;
+        var a = ui_anim("title_item" + string(i), sel ? 1 : 0, 0.22);
+        if (sel) global.ui_hover_key = "title" + string(i);
+        // Highlight bar
+        if (a > 0.01) {
+            draw_set_alpha(0.85 * a);
+            draw_set_color(make_color_rgb(12, 30, 46));
+            draw_rectangle(lx - 20, by, lx - 20 + 560 * a, by + bh, false);
+            draw_set_alpha(a);
+            draw_set_color(i == 4 ? C_BAD : C_ACCENT);
+            draw_rectangle(lx - 20, by, lx - 15, by + bh, false);
+            draw_set_alpha(1);
+        }
+        draw_set_font(fnt_h2);
+        draw_set_halign(fa_left); draw_set_valign(fa_middle);
+        draw_set_color(ui_col_mix(C_DIM, (i == 4) ? C_BAD : c_white, a));
+        draw_text(lx + 10 + a * 14, by + 26, items[i][0]);
+        draw_set_font(fnt_small);
+        draw_set_color(ui_col_mix(C_FAINT, C_DIM, a));
+        draw_text(lx + 10 + a * 14, by + 52, items[i][1]);
+    }
+
+    // Footer
+    draw_set_font(fnt_small);
+    draw_set_halign(fa_left); draw_set_valign(fa_middle);
+    draw_set_color(C_FAINT);
+    var kx = lx - 20;
+    kx += ui_keycap(kx, 1030, "W") + 4;
+    kx += ui_keycap(kx, 1030, "S") + 8;
+    draw_text(kx, 1030, "Navigate");
+    kx += 80;
+    kx += ui_keycap(kx, 1030, "Enter") + 8;
+    draw_set_color(C_FAINT);
+    draw_text(kx, 1030, "Select");
+    kx += 70;
+    kx += ui_keycap(kx, 1030, "F11") + 8;
+    draw_set_color(C_FAINT);
+    draw_text(kx, 1030, "Fullscreen");
+    draw_set_halign(fa_right);
+    draw_text(1890, 1030, "v2.1  -  LAN ports TCP 6510 / UDP 6511");
+    draw_set_font(fnt_body);
 }
 
 /// @desc Draws dedicated, significantly improved Local Setup Screen (1-4 players & character roles)
@@ -3821,10 +1913,7 @@ function ui_draw_local_setup_screen(state, mx, my) {
     var con_h = 1010;
     
     // Main Console Housing
-    draw_set_color(make_color_rgb(16, 22, 32));
-    draw_roundrect_ext(con_x, con_y, con_x + con_w, con_y + con_h, 14, 14, false);
-    draw_set_color(make_color_rgb(44, 60, 84));
-    draw_roundrect_ext(con_x, con_y, con_x + con_w, con_y + con_h, 14, 14, true);
+    ui_box(con_x, con_y, con_x + con_w, con_y + con_h, make_color_rgb(16, 22, 32), make_color_rgb(44, 60, 84), 14);
     
     // High-tech corner brackets
     draw_set_color(make_color_rgb(0, 229, 255));
@@ -3838,14 +1927,11 @@ function ui_draw_local_setup_screen(state, mx, my) {
     draw_line_width(con_x + con_w - 30, con_y + con_h, con_x + con_w, con_y + con_h, 3);
     
     // Header Bar
-    draw_set_color(make_color_rgb(24, 32, 48));
-    draw_roundrect_ext(con_x + 10, con_y + 10, con_x + con_w - 10, con_y + 70, 8, 8, false);
-    draw_set_color(make_color_rgb(52, 73, 94));
-    draw_roundrect_ext(con_x + 10, con_y + 10, con_x + con_w - 10, con_y + 70, 8, 8, true);
+    ui_box(con_x + 10, con_y + 10, con_x + con_w - 10, con_y + 70, make_color_rgb(24, 32, 48), make_color_rgb(52, 73, 94), 8);
     
     draw_set_halign(fa_left); draw_set_valign(fa_middle);
-    draw_set_color(c_yellow);
-    draw_text_transformed(con_x + 30, con_y + 32, "TACTICAL SQUAD BRIEFING // ROSTER ALLOCATION", 1.35, 1.35, 0);
+    draw_set_color(C_AMBER);
+    ui_text_scaled(con_x + 30, con_y + 32, "TACTICAL SQUAD BRIEFING // ROSTER ALLOCATION", 1.35);
     draw_set_color(make_color_rgb(140, 180, 215));
     draw_text(con_x + 30, con_y + 54, "Select operative count and assign specialized tactical classes. Team size dynamically scales starting operative energy.");
     
@@ -3871,19 +1957,16 @@ function ui_draw_local_setup_screen(state, mx, my) {
         state.local_setup_count_hover[c] = chov;
         
         var card_bg = is_sel ? make_color_rgb(32, 60, 88) : (chov ? make_color_rgb(28, 40, 58) : make_color_rgb(20, 26, 38));
-        var card_bd = is_sel ? c_yellow : (chov ? c_white : make_color_rgb(60, 80, 110));
+        var card_bd = is_sel ? C_AMBER : (chov ? c_white : make_color_rgb(60, 80, 110));
         
-        draw_set_color(card_bg);
-        draw_roundrect_ext(cx, count_y, cx + count_w, count_y + count_h, 8, 8, false);
-        draw_set_color(card_bd);
-        draw_roundrect_ext(cx, count_y, cx + count_w, count_y + count_h, 8, 8, true);
+        ui_box(cx, count_y, cx + count_w, count_y + count_h, card_bg, card_bd, 8);
         if (is_sel) {
             draw_roundrect_ext(cx + 1, count_y + 1, cx + count_w - 1, count_y + count_h - 1, 8, 8, true);
         }
         
         draw_set_halign(fa_left); draw_set_valign(fa_top);
-        draw_set_color(is_sel ? c_yellow : (chov ? c_white : make_color_rgb(180, 205, 230)));
-        draw_text_transformed(cx + 16, count_y + 10, size_info[c][0], 1.1, 1.1, 0);
+        draw_set_color(is_sel ? C_AMBER : (chov ? c_white : make_color_rgb(180, 205, 230)));
+        ui_text_scaled(cx + 16, count_y + 10, size_info[c][0], 1.1);
         
         draw_set_color(is_sel ? make_color_rgb(255, 235, 59) : make_color_rgb(120, 180, 160));
         draw_text(cx + 16, count_y + 32, size_info[c][1]);
@@ -3894,7 +1977,7 @@ function ui_draw_local_setup_screen(state, mx, my) {
         // Active radio check indicator on right
         var rad_x = cx + count_w - 24;
         var rad_y = count_y + 22;
-        draw_set_color(is_sel ? c_yellow : make_color_rgb(60, 75, 100));
+        draw_set_color(is_sel ? C_AMBER : make_color_rgb(60, 75, 100));
         draw_circle(rad_x, rad_y, 9, is_sel ? false : true);
         if (is_sel) {
             draw_set_color(c_black);
@@ -3930,10 +2013,7 @@ function ui_draw_local_setup_screen(state, mx, my) {
         var calc_energy = game_calculate_player_max_energy(p_class, p_count, 0);
         
         // Card Body Housing
-        draw_set_color(make_color_rgb(20, 26, 38));
-        draw_roundrect_ext(card_x, dossier_y, card_x + card_w, dossier_y + dossier_h, 10, 10, false);
-        draw_set_color(p_col);
-        draw_roundrect_ext(card_x, dossier_y, card_x + card_w, dossier_y + dossier_h, 10, 10, true);
+        ui_box(card_x, dossier_y, card_x + card_w, dossier_y + dossier_h, make_color_rgb(20, 26, 38), p_col, 10);
         draw_roundrect_ext(card_x + 1, dossier_y + 1, card_x + card_w - 1, dossier_y + dossier_h - 1, 10, 10, true);
         
         // 1. Operative Header Strip
@@ -3942,7 +2022,7 @@ function ui_draw_local_setup_screen(state, mx, my) {
         
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(c_black);
-        draw_text_transformed(card_x + 16, dossier_y + 23, "OPERATIVE 0" + string(p + 1), 1.15, 1.15, 0);
+        ui_text_scaled(card_x + 16, dossier_y + 23, "OPERATIVE 0" + string(p + 1), 1.15);
         
         draw_set_halign(fa_right);
         draw_text(card_x + card_w - 16, dossier_y + 23, "TEAM SLOT " + string(p + 1));
@@ -3957,10 +2037,7 @@ function ui_draw_local_setup_screen(state, mx, my) {
         var name_hov = ui_point_in_rect(mx, my, name_bx, name_by, name_bw, name_bh);
         state.local_setup_name_hover[p] = name_hov;
         
-        draw_set_color(is_editing ? make_color_rgb(38, 52, 74) : (name_hov ? make_color_rgb(30, 42, 60) : make_color_rgb(14, 18, 28)));
-        draw_roundrect_ext(name_bx, name_by, name_bx + name_bw, name_by + name_bh, 6, 6, false);
-        draw_set_color(is_editing ? c_yellow : (name_hov ? c_white : make_color_rgb(70, 95, 130)));
-        draw_roundrect_ext(name_bx, name_by, name_bx + name_bw, name_by + name_bh, 6, 6, true);
+        ui_box(name_bx, name_by, name_bx + name_bw, name_by + name_bh, is_editing ? make_color_rgb(38, 52, 74) : (name_hov ? make_color_rgb(30, 42, 60) : make_color_rgb(14, 18, 28)), is_editing ? C_AMBER : (name_hov ? c_white : make_color_rgb(70, 95, 130)), 6);
         
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(make_color_rgb(130, 160, 195));
@@ -3970,8 +2047,8 @@ function ui_draw_local_setup_screen(state, mx, my) {
         if (is_editing && ((state.name_cursor_timer div 25) % 2 == 0)) {
             disp_name += "|";
         }
-        draw_set_color(is_editing ? c_yellow : c_white);
-        draw_text_transformed(name_bx + 90, name_by + 26, disp_name, 1.2, 1.2, 0);
+        draw_set_color(is_editing ? C_AMBER : c_white);
+        ui_text_scaled(name_bx + 90, name_by + 26, disp_name, 1.2);
         
         draw_set_halign(fa_right);
         draw_set_color(make_color_rgb(90, 115, 145));
@@ -3992,24 +2069,18 @@ function ui_draw_local_setup_screen(state, mx, my) {
         state.local_setup_prev_hover[p] = prev_hov;
         state.local_setup_next_hover[p] = next_hov;
         
-        draw_set_color(make_color_rgb(26, 36, 52));
-        draw_roundrect_ext(cname_x, cycler_y, cname_x + cname_w, cycler_y + cycler_h, 6, 6, false);
-        draw_set_color(make_color_rgb(52, 73, 94));
-        draw_roundrect_ext(cname_x, cycler_y, cname_x + cname_w, cycler_y + cycler_h, 6, 6, true);
+        ui_box(cname_x, cycler_y, cname_x + cname_w, cycler_y + cycler_h, make_color_rgb(26, 36, 52), make_color_rgb(52, 73, 94), 6);
         
         draw_set_halign(fa_center); draw_set_valign(fa_middle);
-        draw_set_color(c_yellow);
-        draw_text_transformed(cname_x + cname_w * 0.5, cycler_y + 18, p_class.name, 1.2, 1.2, 0);
+        draw_set_color(C_AMBER);
+        ui_text_scaled(cname_x + cname_w * 0.5, cycler_y + 18, p_class.name, 1.2);
         draw_set_color(make_color_rgb(100, 181, 246));
         draw_text(cname_x + cname_w * 0.5, cycler_y + 38, "// " + p_class.role + " //");
         
         // 4. Class Emblem & Holographic Avatar Plate
         var avatar_y = cycler_y + cycler_h + 14;
         var avatar_h = 135;
-        draw_set_color(make_color_rgb(14, 18, 28));
-        draw_roundrect_ext(card_x + 16, avatar_y, card_x + card_w - 16, avatar_y + avatar_h, 8, 8, false);
-        draw_set_color(make_color_rgb(40, 56, 80));
-        draw_roundrect_ext(card_x + 16, avatar_y, card_x + card_w - 16, avatar_y + avatar_h, 8, 8, true);
+        ui_box(card_x + 16, avatar_y, card_x + card_w - 16, avatar_y + avatar_h, make_color_rgb(14, 18, 28), make_color_rgb(40, 56, 80), 8);
         
         // Draw Class Emblem Vector
         var emblem_cx = card_x + card_w * 0.5;
@@ -4022,29 +2093,23 @@ function ui_draw_local_setup_screen(state, mx, my) {
         var spec_w = card_w - 32;
         var spec_x = card_x + 16;
         
-        draw_set_color(make_color_rgb(16, 22, 34));
-        draw_roundrect_ext(spec_x, spec_y, spec_x + spec_w, spec_y + spec_h, 8, 8, false);
-        draw_set_color(make_color_rgb(45, 62, 88));
-        draw_roundrect_ext(spec_x, spec_y, spec_x + spec_w, spec_y + spec_h, 8, 8, true);
+        ui_box(spec_x, spec_y, spec_x + spec_w, spec_y + spec_h, make_color_rgb(16, 22, 34), make_color_rgb(45, 62, 88), 8);
         
         draw_set_halign(fa_left); draw_set_valign(fa_top);
         draw_set_color(make_color_rgb(0, 229, 255));
         draw_text(spec_x + 14, spec_y + 12, "[FIELD SPECIFICATIONS]");
         
         // Perk Tag Badge
-        draw_set_color(make_color_rgb(32, 45, 65));
-        draw_roundrect_ext(spec_x + 14, spec_y + 36, spec_x + spec_w - 14, spec_y + 64, 4, 4, false);
-        draw_set_color(make_color_rgb(64, 90, 130));
-        draw_roundrect_ext(spec_x + 14, spec_y + 36, spec_x + spec_w - 14, spec_y + 64, 4, 4, true);
+        ui_box(spec_x + 14, spec_y + 36, spec_x + spec_w - 14, spec_y + 64, make_color_rgb(32, 45, 65), make_color_rgb(64, 90, 130), 4);
         
         draw_set_valign(fa_middle);
-        draw_set_color(c_yellow);
+        draw_set_color(C_AMBER);
         draw_text(spec_x + 22, spec_y + 50, p_class.perk_tag);
         
         // Descriptive perks text
         draw_set_valign(fa_top);
         draw_set_color(c_white);
-        draw_text_ext(spec_x + 14, spec_y + 74, p_class.desc, 20, spec_w - 28);
+        ui_text_ext(spec_x + 14, spec_y + 74, p_class.desc, 20, spec_w - 28);
         
         // Base Energy & Move Cost stat line
         var move_cost_str = (p_class.id == "scout" || p_class.id == "pathfinder") ? "1 Energy (Agile)" : "2 Energy (Standard)";
@@ -4061,18 +2126,15 @@ function ui_draw_local_setup_screen(state, mx, my) {
         var eplate_x = card_x + 16;
         var eplate_w = card_w - 32;
         
-        draw_set_color(make_color_rgb(26, 38, 56));
-        draw_roundrect_ext(eplate_x, eplate_y, eplate_x + eplate_w, eplate_y + eplate_h, 8, 8, false);
-        draw_set_color(make_color_rgb(255, 215, 0));
-        draw_roundrect_ext(eplate_x, eplate_y, eplate_x + eplate_w, eplate_y + eplate_h, 8, 8, true);
+        ui_box(eplate_x, eplate_y, eplate_x + eplate_w, eplate_y + eplate_h, make_color_rgb(26, 38, 56), make_color_rgb(255, 215, 0), 8);
         
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(c_white);
-        draw_text_transformed(eplate_x + 16, eplate_y + eplate_h * 0.5, "STARTING ENERGY:", 1.1, 1.1, 0);
+        ui_text_scaled(eplate_x + 16, eplate_y + eplate_h * 0.5, "STARTING ENERGY:", 1.1);
         
         draw_set_halign(fa_right);
-        draw_set_color(c_yellow);
-        draw_text_transformed(eplate_x + eplate_w - 44, eplate_y + eplate_h * 0.5, string(calc_energy), 1.4, 1.4, 0);
+        draw_set_color(C_AMBER);
+        ui_text_scaled(eplate_x + eplate_w - 44, eplate_y + eplate_h * 0.5, string(calc_energy), 1.4);
         ui_draw_lightning(eplate_x + eplate_w - 20, eplate_y + eplate_h * 0.5, 20, true);
     }
     
@@ -4095,15 +2157,12 @@ function ui_draw_local_setup_screen(state, mx, my) {
     var l_hov = ui_point_in_rect(mx, my, launch_x, bottom_y, launch_w, launch_h);
     state.local_setup_start_hover = l_hov;
     
-    draw_set_color(l_hov ? make_color_rgb(46, 204, 113) : make_color_rgb(39, 174, 96));
-    draw_roundrect_ext(launch_x, bottom_y, launch_x + launch_w, bottom_y + launch_h, 10, 10, false);
-    draw_set_color(l_hov ? c_yellow : c_white);
-    draw_roundrect_ext(launch_x, bottom_y, launch_x + launch_w, bottom_y + launch_h, 10, 10, true);
+    ui_box(launch_x, bottom_y, launch_x + launch_w, bottom_y + launch_h, l_hov ? make_color_rgb(46, 204, 113) : make_color_rgb(39, 174, 96), l_hov ? C_AMBER : c_white, 10);
     draw_roundrect_ext(launch_x + 1, bottom_y + 1, launch_x + launch_w - 1, bottom_y + launch_h - 1, 10, 10, true);
     
     draw_set_halign(fa_center); draw_set_valign(fa_middle);
     draw_set_color(l_hov ? c_black : c_white);
-    draw_text_transformed(launch_x + launch_w * 0.5, bottom_y + launch_h * 0.5, "DEPLOY STRIKE TEAM // LAUNCH MISSION [SPACE] >>", 1.15, 1.15, 0);
+    ui_text_scaled(launch_x + launch_w * 0.5, bottom_y + launch_h * 0.5, "LAUNCH MISSION   [ENTER]", 1.15);
 }
 
 /// @desc Draws Callsign / Username Entry Screen for Online Wi-Fi Multiplayer
@@ -4116,10 +2175,7 @@ function ui_draw_online_username_screen(state, mx, my) {
     var term_y = (1080 - term_h) * 0.5;
     
     // Terminal Housing
-    draw_set_color(make_color_rgb(18, 24, 36));
-    draw_roundrect_ext(term_x, term_y, term_x + term_w, term_y + term_h, 14, 14, false);
-    draw_set_color(make_color_rgb(0, 180, 216));
-    draw_roundrect_ext(term_x, term_y, term_x + term_w, term_y + term_h, 14, 14, true);
+    ui_box(term_x, term_y, term_x + term_w, term_y + term_h, make_color_rgb(18, 24, 36), make_color_rgb(0, 180, 216), 14);
     
     // Glowing Laser Accent Brackets
     draw_set_color(make_color_rgb(0, 229, 255));
@@ -4135,7 +2191,7 @@ function ui_draw_online_username_screen(state, mx, my) {
     // Header
     draw_set_halign(fa_center); draw_set_valign(fa_top);
     draw_set_color(make_color_rgb(0, 229, 255));
-    draw_text_transformed(960, term_y + 36, "OPERATIVE IDENTIFICATION TERMINAL", 1.4, 1.4, 0);
+    ui_text_scaled(960, term_y + 36, "OPERATIVE IDENTIFICATION TERMINAL", 1.4);
     draw_set_color(make_color_rgb(140, 185, 225));
     draw_text(960, term_y + 76, "// SECURE LOCAL WI-FI PROTOCOL // LAN DISCOVERY REGISTRATION //");
     
@@ -4144,7 +2200,7 @@ function ui_draw_online_username_screen(state, mx, my) {
     
     // Information Notice
     draw_set_color(make_color_rgb(200, 225, 245));
-    draw_text_ext(960, term_y + 130, "Please enter your Tactical Callsign before entering public Wi-Fi rooms.\nOther players on your local network will identify your room and actions by this name.", 24, term_w - 100);
+    ui_text_ext(960, term_y + 130, "Please enter your Tactical Callsign before entering public Wi-Fi rooms.\nOther players on your local network will identify your room and actions by this name.", 24, term_w - 100);
     
     // Textbox
     var input_w = 560;
@@ -4152,10 +2208,7 @@ function ui_draw_online_username_screen(state, mx, my) {
     var input_x = 960 - input_w * 0.5;
     var input_y = term_y + 225;
     
-    draw_set_color(make_color_rgb(12, 16, 24));
-    draw_roundrect_ext(input_x, input_y, input_x + input_w, input_y + input_h, 8, 8, false);
-    draw_set_color(c_yellow);
-    draw_roundrect_ext(input_x, input_y, input_x + input_w, input_y + input_h, 8, 8, true);
+    ui_box(input_x, input_y, input_x + input_w, input_y + input_h, make_color_rgb(12, 16, 24), C_AMBER, 8);
     draw_roundrect_ext(input_x + 1, input_y + 1, input_x + input_w - 1, input_y + input_h - 1, 8, 8, true);
     
     var disp_input = state.net_username_input;
@@ -4165,7 +2218,7 @@ function ui_draw_online_username_screen(state, mx, my) {
     
     draw_set_halign(fa_center); draw_set_valign(fa_middle);
     draw_set_color(c_white);
-    draw_text_transformed(960, input_y + input_h * 0.5, disp_input, 1.4, 1.4, 0);
+    ui_text_scaled(960, input_y + input_h * 0.5, disp_input, 1.4);
     
     draw_set_color(make_color_rgb(100, 130, 165));
     draw_text(960, input_y + input_h + 24, "Type your callsign (up to 14 characters) and press ENTER to confirm.");
@@ -4188,14 +2241,11 @@ function ui_draw_online_username_screen(state, mx, my) {
     var conf_hov = ui_point_in_rect(mx, my, conf_x, by, conf_w, btn_h);
     state.online_user_confirm_hover = conf_hov;
     
-    draw_set_color(conf_hov ? make_color_rgb(46, 204, 113) : make_color_rgb(39, 174, 96));
-    draw_roundrect_ext(conf_x, by, conf_x + conf_w, by + btn_h, 8, 8, false);
-    draw_set_color(conf_hov ? c_yellow : c_white);
-    draw_roundrect_ext(conf_x, by, conf_x + conf_w, by + btn_h, 8, 8, true);
+    ui_box(conf_x, by, conf_x + conf_w, by + btn_h, conf_hov ? make_color_rgb(46, 204, 113) : make_color_rgb(39, 174, 96), conf_hov ? C_AMBER : c_white, 8);
     
     draw_set_halign(fa_center); draw_set_valign(fa_middle);
     draw_set_color(conf_hov ? c_black : c_white);
-    draw_text_transformed(conf_x + conf_w * 0.5, by + btn_h * 0.5, "CONTINUE TO WI-FI ROOMS >>", 1.1, 1.1, 0);
+    ui_text_scaled(conf_x + conf_w * 0.5, by + btn_h * 0.5, "CONTINUE TO WI-FI ROOMS >>", 1.1);
 }
 
 /// @desc Draws Public Room Browser for Local Wi-Fi Multiplayer
@@ -4208,10 +2258,7 @@ function ui_draw_online_browser_screen(state, mx, my) {
     var con_h = 1010;
     
     // Console Housing
-    draw_set_color(make_color_rgb(16, 22, 32));
-    draw_roundrect_ext(con_x, con_y, con_x + con_w, con_y + con_h, 14, 14, false);
-    draw_set_color(make_color_rgb(44, 60, 84));
-    draw_roundrect_ext(con_x, con_y, con_x + con_w, con_y + con_h, 14, 14, true);
+    ui_box(con_x, con_y, con_x + con_w, con_y + con_h, make_color_rgb(16, 22, 32), make_color_rgb(44, 60, 84), 14);
     
     // Corner brackets
     draw_set_color(make_color_rgb(0, 229, 255));
@@ -4225,14 +2272,11 @@ function ui_draw_online_browser_screen(state, mx, my) {
     draw_line_width(con_x + con_w - 30, con_y + con_h, con_x + con_w, con_y + con_h, 3);
     
     // Header Bar
-    draw_set_color(make_color_rgb(24, 32, 48));
-    draw_roundrect_ext(con_x + 10, con_y + 10, con_x + con_w - 10, con_y + 70, 8, 8, false);
-    draw_set_color(make_color_rgb(52, 73, 94));
-    draw_roundrect_ext(con_x + 10, con_y + 10, con_x + con_w - 10, con_y + 70, 8, 8, true);
+    ui_box(con_x + 10, con_y + 10, con_x + con_w - 10, con_y + 70, make_color_rgb(24, 32, 48), make_color_rgb(52, 73, 94), 8);
     
     draw_set_halign(fa_left); draw_set_valign(fa_middle);
     draw_set_color(make_color_rgb(0, 229, 255));
-    draw_text_transformed(con_x + 30, con_y + 32, "LOCAL WI-FI MULTIPLAYER // PUBLIC ROOM BROWSER", 1.35, 1.35, 0);
+    ui_text_scaled(con_x + 30, con_y + 32, "LOCAL WI-FI MULTIPLAYER // PUBLIC ROOM BROWSER", 1.35);
     draw_set_color(make_color_rgb(140, 180, 215));
     draw_text(con_x + 30, con_y + 54, "Auto-discovering defense outpost rooms beaconing on local Wi-Fi subnet (UDP 6511 / TCP 6510).");
     
@@ -4244,9 +2288,10 @@ function ui_draw_online_browser_screen(state, mx, my) {
     
     // Status message / pulsing green dot
     draw_set_color(make_color_rgb(46, 204, 113));
-    draw_circle(con_x + con_w - 220, con_y + 54, 5, false);
+    draw_circle(con_x + con_w - 250, con_y + 54, 5, false);
     draw_set_color(make_color_rgb(160, 220, 180));
-    draw_text(con_x + con_w - 30, con_y + 54, "Wi-Fi Subnet Scanner Online");
+    draw_set_halign(fa_left);
+    draw_text(con_x + con_w - 238, con_y + 54, (state.net_udp_listener >= 0) ? "Scanning for rooms..." : "Auto-discovery offline");
     
     // -----------------------------------------------------------------
     // ACTION CONTROLS ROW
@@ -4260,14 +2305,11 @@ function ui_draw_online_browser_screen(state, mx, my) {
     var c_hov = ui_point_in_rect(mx, my, create_x, act_y, create_w, act_h);
     state.online_browser_create_hover = c_hov;
     
-    draw_set_color(c_hov ? make_color_rgb(46, 204, 113) : make_color_rgb(39, 174, 96));
-    draw_roundrect_ext(create_x, act_y, create_x + create_w, act_y + act_h, 8, 8, false);
-    draw_set_color(c_hov ? c_yellow : c_white);
-    draw_roundrect_ext(create_x, act_y, create_x + create_w, act_y + act_h, 8, 8, true);
+    ui_box(create_x, act_y, create_x + create_w, act_y + act_h, c_hov ? make_color_rgb(46, 204, 113) : make_color_rgb(39, 174, 96), c_hov ? C_AMBER : c_white, 8);
     
     draw_set_halign(fa_center); draw_set_valign(fa_middle);
     draw_set_color(c_hov ? c_black : c_white);
-    draw_text_transformed(create_x + create_w * 0.5, act_y + act_h * 0.5, "+ CREATE PUBLIC ROOM", 1.2, 1.2, 0);
+    ui_text_scaled(create_x + create_w * 0.5, act_y + act_h * 0.5, "+ CREATE PUBLIC ROOM", 1.2);
     
     // Refresh Discovery Ping Button
     var ref_w = 210;
@@ -4277,10 +2319,7 @@ function ui_draw_online_browser_screen(state, mx, my) {
     // Direct IP Connect Box (For local subnets / same machine multi-instance testing)
     var dir_w = 560;
     var dir_x = con_x + con_w - 30 - dir_w;
-    draw_set_color(make_color_rgb(20, 28, 42));
-    draw_roundrect_ext(dir_x, act_y, dir_x + dir_w, act_y + act_h, 8, 8, false);
-    draw_set_color(make_color_rgb(52, 73, 94));
-    draw_roundrect_ext(dir_x, act_y, dir_x + dir_w, act_y + act_h, 8, 8, true);
+    ui_box(dir_x, act_y, dir_x + dir_w, act_y + act_h, make_color_rgb(20, 28, 42), make_color_rgb(52, 73, 94), 8);
     
     draw_set_halign(fa_left); draw_set_valign(fa_middle);
     draw_set_color(make_color_rgb(140, 180, 220));
@@ -4293,10 +2332,9 @@ function ui_draw_online_browser_screen(state, mx, my) {
     var ip_by = act_y + (act_h - ip_bh) * 0.5;
     
     var is_editing_ip = state.net_direct_ip_editing;
-    draw_set_color(is_editing_ip ? make_color_rgb(32, 45, 68) : make_color_rgb(14, 18, 28));
-    draw_roundrect_ext(ip_bx, ip_by, ip_bx + ip_bw, ip_by + ip_bh, 6, 6, false);
-    draw_set_color(is_editing_ip ? c_yellow : make_color_rgb(60, 85, 120));
-    draw_roundrect_ext(ip_bx, ip_by, ip_bx + ip_bw, ip_by + ip_bh, 6, 6, true);
+    state.online_browser_ip_hover = ui_point_in_rect(mx, my, ip_bx, ip_by, ip_bw, ip_bh);
+    if (state.online_browser_ip_hover && !is_editing_ip) state.hover_tooltip = "Click to type the host's IP address";
+    ui_box(ip_bx, ip_by, ip_bx + ip_bw, ip_by + ip_bh, is_editing_ip ? make_color_rgb(32, 45, 68) : make_color_rgb(14, 18, 28), is_editing_ip ? C_AMBER : make_color_rgb(60, 85, 120), 6);
     
     var disp_ip = state.net_direct_ip_input;
     if (is_editing_ip && ((state.name_cursor_timer div 25) % 2 == 0)) disp_ip += "|";
@@ -4316,10 +2354,7 @@ function ui_draw_online_browser_screen(state, mx, my) {
     var list_w = con_w - 60;
     var list_x = con_x + 30;
     
-    draw_set_color(make_color_rgb(20, 26, 38));
-    draw_roundrect_ext(list_x, list_y, list_x + list_w, list_y + list_h, 10, 10, false);
-    draw_set_color(make_color_rgb(45, 60, 85));
-    draw_roundrect_ext(list_x, list_y, list_x + list_w, list_y + list_h, 10, 10, true);
+    ui_box(list_x, list_y, list_x + list_w, list_y + list_h, make_color_rgb(20, 26, 38), make_color_rgb(45, 60, 85), 10);
     
     var num_rooms = array_length(state.net_discovered_rooms);
     state.online_browser_room_hover = -1;
@@ -4348,7 +2383,7 @@ function ui_draw_online_browser_screen(state, mx, my) {
         
         draw_set_halign(fa_center); draw_set_valign(fa_middle);
         draw_set_color(c_white);
-        draw_text_transformed(rad_cx, rad_cy + rad_r + 45, "SCANNING LOCAL WI-FI SUBNET FOR DEFENSE ROOMS...", 1.25, 1.25, 0);
+        ui_text_scaled(rad_cx, rad_cy + rad_r + 45, "SCANNING LOCAL WI-FI SUBNET FOR DEFENSE ROOMS...", 1.25);
         draw_set_color(make_color_rgb(140, 170, 205));
         draw_text(rad_cx, rad_cy + rad_r + 85, "No rooms detected yet on your local network.\nClick '+ CREATE PUBLIC ROOM' to host your own, or ask another player on the same Wi-Fi to create a room.");
     } else {
@@ -4372,14 +2407,11 @@ function ui_draw_online_browser_screen(state, mx, my) {
             var rm = state.net_discovered_rooms[r];
             var ry = r_start_y + r * (r_row_h + 10);
             
-            draw_set_color(make_color_rgb(24, 32, 48));
-            draw_roundrect_ext(list_x + 12, ry, list_x + list_w - 12, ry + r_row_h, 8, 8, false);
-            draw_set_color(make_color_rgb(45, 65, 95));
-            draw_roundrect_ext(list_x + 12, ry, list_x + list_w - 12, ry + r_row_h, 8, 8, true);
+            ui_box(list_x + 12, ry, list_x + list_w - 12, ry + r_row_h, make_color_rgb(24, 32, 48), make_color_rgb(45, 65, 95), 8);
             
             draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(c_yellow);
-            draw_text_transformed(list_x + 30, ry + r_row_h * 0.5, rm.room_name, 1.15, 1.15, 0);
+            draw_set_color(C_AMBER);
+            ui_text_scaled(list_x + 30, ry + r_row_h * 0.5, rm.room_name, 1.15);
             
             draw_set_color(c_white);
             draw_text(list_x + 480, ry + r_row_h * 0.5, rm.host_name);
@@ -4427,10 +2459,7 @@ function ui_draw_online_lobby_screen(state, mx, my) {
     var con_h = 1010;
     
     // Console Housing
-    draw_set_color(make_color_rgb(16, 22, 32));
-    draw_roundrect_ext(con_x, con_y, con_x + con_w, con_y + con_h, 14, 14, false);
-    draw_set_color(make_color_rgb(44, 60, 84));
-    draw_roundrect_ext(con_x, con_y, con_x + con_w, con_y + con_h, 14, 14, true);
+    ui_box(con_x, con_y, con_x + con_w, con_y + con_h, make_color_rgb(16, 22, 32), make_color_rgb(44, 60, 84), 14);
     
     // Corner brackets
     draw_set_color(make_color_rgb(0, 229, 255));
@@ -4444,23 +2473,27 @@ function ui_draw_online_lobby_screen(state, mx, my) {
     draw_line_width(con_x + con_w - 30, con_y + con_h, con_x + con_w, con_y + con_h, 3);
     
     // Header Bar
-    draw_set_color(make_color_rgb(24, 32, 48));
-    draw_roundrect_ext(con_x + 10, con_y + 10, con_x + con_w - 10, con_y + 70, 8, 8, false);
-    draw_set_color(make_color_rgb(52, 73, 94));
-    draw_roundrect_ext(con_x + 10, con_y + 10, con_x + con_w - 10, con_y + 70, 8, 8, true);
+    ui_box(con_x + 10, con_y + 10, con_x + con_w - 10, con_y + 70, make_color_rgb(24, 32, 48), make_color_rgb(52, 73, 94), 8);
     
     var num_joined = array_length(state.net_lobby_players);
     draw_set_halign(fa_left); draw_set_valign(fa_middle);
-    draw_set_color(c_yellow);
-    draw_text_transformed(con_x + 30, con_y + 32, "TACTICAL DEFENSE OUTPOST // WI-FI MISSION LOBBY", 1.35, 1.35, 0);
+    draw_set_color(C_AMBER);
+    ui_text_scaled(con_x + 30, con_y + 32, "TACTICAL DEFENSE OUTPOST // WI-FI MISSION LOBBY", 1.35);
     
     draw_set_color(make_color_rgb(140, 180, 215));
-    var role_label = state.is_host ? "HOST COMMANDER (You control mission launch)" : "JOINED OPERATIVE (Waiting for commander)";
-    draw_text(con_x + 30, con_y + 54, "Status: " + role_label + "  |  Network: Local Wi-Fi Subnet");
+    var role_label = state.is_host ? "You are the host - launch when your squad is ready" : "Joined - waiting for the host to launch";
+    var ip_hint = state.is_host ? ((state.net_local_ip != "") ? ("Friends can join by IP: " + state.net_local_ip) : "Friends on your Wi-Fi will see this room automatically") : ("Host: " + state.net_host_ip);
+    draw_text(con_x + 30, con_y + 54, role_label + "   |   " + ip_hint);
+    if (state.net_status_message != "") {
+        draw_set_halign(fa_right);
+        draw_set_color(C_FAINT);
+        draw_text(con_x + con_w - 30, con_y + 96, state.net_status_message);
+        draw_set_halign(fa_left);
+    }
     
     draw_set_halign(fa_right);
     draw_set_color(make_color_rgb(0, 229, 255));
-    draw_text_transformed(con_x + con_w - 30, con_y + 40, string(num_joined) + " / 4 OPERATIVES CONNECTED", 1.25, 1.25, 0);
+    ui_text_scaled(con_x + con_w - 30, con_y + 40, string(num_joined) + " / 4 OPERATIVES CONNECTED", 1.25);
     
     // -----------------------------------------------------------------
     // 4 OPERATIVE SLOTS (Large columns side-by-side)
@@ -4492,10 +2525,7 @@ function ui_draw_online_lobby_screen(state, mx, my) {
         var is_me = (s == state.net_my_player_idx);
         
         // Slot Box
-        draw_set_color(is_occupied ? make_color_rgb(20, 26, 38) : make_color_rgb(14, 18, 26));
-        draw_roundrect_ext(sx, slot_y, sx + slot_w, slot_y + slot_h, 10, 10, false);
-        draw_set_color(is_occupied ? p_col : make_color_rgb(45, 60, 80));
-        draw_roundrect_ext(sx, slot_y, sx + slot_w, slot_y + slot_h, 10, 10, true);
+        ui_box(sx, slot_y, sx + slot_w, slot_y + slot_h, is_occupied ? make_color_rgb(20, 26, 38) : make_color_rgb(14, 18, 26), is_occupied ? p_col : make_color_rgb(45, 60, 80), 10);
         if (is_occupied) {
             draw_roundrect_ext(sx + 1, slot_y + 1, sx + slot_w - 1, slot_y + slot_h - 1, 10, 10, true);
         }
@@ -4506,7 +2536,7 @@ function ui_draw_online_lobby_screen(state, mx, my) {
         
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(is_occupied ? c_black : make_color_rgb(140, 160, 180));
-        draw_text_transformed(sx + 16, slot_y + 23, "OPERATIVE 0" + string(s + 1), 1.1, 1.1, 0);
+        ui_text_scaled(sx + 16, slot_y + 23, "OPERATIVE 0" + string(s + 1), 1.1);
         
         draw_set_halign(fa_right);
         if (s == 0) {
@@ -4520,14 +2550,11 @@ function ui_draw_online_lobby_screen(state, mx, my) {
         if (is_occupied) {
             // Player Name / Callsign Plate
             var nb_y = slot_y + 54;
-            draw_set_color(make_color_rgb(14, 18, 28));
-            draw_roundrect_ext(sx + 16, nb_y, sx + slot_w - 16, nb_y + 48, 6, 6, false);
-            draw_set_color(is_me ? c_yellow : make_color_rgb(60, 85, 120));
-            draw_roundrect_ext(sx + 16, nb_y, sx + slot_w - 16, nb_y + 48, 6, 6, true);
+            ui_box(sx + 16, nb_y, sx + slot_w - 16, nb_y + 48, make_color_rgb(14, 18, 28), is_me ? C_AMBER : make_color_rgb(60, 85, 120), 6);
             
             draw_set_halign(fa_center); draw_set_valign(fa_middle);
             draw_set_color(c_white);
-            draw_text_transformed(sx + slot_w * 0.5, nb_y + 24, pl.name, 1.25, 1.25, 0);
+            ui_text_scaled(sx + slot_w * 0.5, nb_y + 24, pl.name, 1.25);
             
             // Match Class
             var c_idx = 0;
@@ -4553,26 +2580,20 @@ function ui_draw_online_lobby_screen(state, mx, my) {
                 if (prev_h) state.online_lobby_prev_hover = true;
                 if (next_h) state.online_lobby_next_hover = true;
                 
-                draw_set_color(make_color_rgb(26, 36, 52));
-                draw_roundrect_ext(cx_box, cyc_y, cx_box + cw_box, cyc_y + cyc_h, 6, 6, false);
-                draw_set_color(c_yellow);
-                draw_roundrect_ext(cx_box, cyc_y, cx_box + cw_box, cyc_y + cyc_h, 6, 6, true);
+                ui_box(cx_box, cyc_y, cx_box + cw_box, cyc_y + cyc_h, make_color_rgb(26, 36, 52), C_AMBER, 6);
                 
                 draw_set_halign(fa_center); draw_set_valign(fa_middle);
-                draw_set_color(c_yellow);
-                draw_text_transformed(cx_box + cw_box * 0.5, cyc_y + 18, p_class.name, 1.15, 1.15, 0);
+                draw_set_color(C_AMBER);
+                ui_text_scaled(cx_box + cw_box * 0.5, cyc_y + 18, p_class.name, 1.15);
                 draw_set_color(make_color_rgb(100, 181, 246));
                 draw_text(cx_box + cw_box * 0.5, cyc_y + 38, "// " + p_class.role + " //");
             } else {
                 // Other connected players: read-only class plate
-                draw_set_color(make_color_rgb(24, 32, 46));
-                draw_roundrect_ext(sx + 16, cyc_y, sx + slot_w - 16, cyc_y + cyc_h, 6, 6, false);
-                draw_set_color(make_color_rgb(52, 73, 94));
-                draw_roundrect_ext(sx + 16, cyc_y, sx + slot_w - 16, cyc_y + cyc_h, 6, 6, true);
+                ui_box(sx + 16, cyc_y, sx + slot_w - 16, cyc_y + cyc_h, make_color_rgb(24, 32, 46), make_color_rgb(52, 73, 94), 6);
                 
                 draw_set_halign(fa_center); draw_set_valign(fa_middle);
                 draw_set_color(c_white);
-                draw_text_transformed(sx + slot_w * 0.5, cyc_y + 18, p_class.name, 1.15, 1.15, 0);
+                ui_text_scaled(sx + slot_w * 0.5, cyc_y + 18, p_class.name, 1.15);
                 draw_set_color(make_color_rgb(140, 180, 215));
                 draw_text(sx + slot_w * 0.5, cyc_y + 38, "// " + p_class.role + " //");
             }
@@ -4580,10 +2601,7 @@ function ui_draw_online_lobby_screen(state, mx, my) {
             // Class Emblem Box
             var em_y = cyc_y + cyc_h + 14;
             var em_h = 145;
-            draw_set_color(make_color_rgb(14, 18, 28));
-            draw_roundrect_ext(sx + 16, em_y, sx + slot_w - 16, em_y + em_h, 8, 8, false);
-            draw_set_color(make_color_rgb(40, 56, 80));
-            draw_roundrect_ext(sx + 16, em_y, sx + slot_w - 16, em_y + em_h, 8, 8, true);
+            ui_box(sx + 16, em_y, sx + slot_w - 16, em_y + em_h, make_color_rgb(14, 18, 28), make_color_rgb(40, 56, 80), 8);
             ui_draw_class_emblem(sx + slot_w * 0.5, em_y + em_h * 0.5, p_class.id, p_col, true);
             
             // Tactical Perks Box
@@ -4592,27 +2610,21 @@ function ui_draw_online_lobby_screen(state, mx, my) {
             var pk_w = slot_w - 32;
             var pk_x = sx + 16;
             
-            draw_set_color(make_color_rgb(16, 22, 34));
-            draw_roundrect_ext(pk_x, pk_y, pk_x + pk_w, pk_y + pk_h, 8, 8, false);
-            draw_set_color(make_color_rgb(45, 62, 88));
-            draw_roundrect_ext(pk_x, pk_y, pk_x + pk_w, pk_y + pk_h, 8, 8, true);
+            ui_box(pk_x, pk_y, pk_x + pk_w, pk_y + pk_h, make_color_rgb(16, 22, 34), make_color_rgb(45, 62, 88), 8);
             
             draw_set_halign(fa_left); draw_set_valign(fa_top);
             draw_set_color(make_color_rgb(0, 229, 255));
             draw_text(pk_x + 14, pk_y + 12, "[TACTICAL SPECIALTY]");
             
-            draw_set_color(c_yellow);
+            draw_set_color(C_AMBER);
             draw_text(pk_x + 14, pk_y + 38, p_class.perk_tag);
             
             draw_set_color(c_white);
-            draw_text_ext(pk_x + 14, pk_y + 68, p_class.desc, 20, pk_w - 28);
+            ui_text_ext(pk_x + 14, pk_y + 68, p_class.desc, 20, pk_w - 28);
             
             // Connected Status Badge
             var stat_y = slot_y + slot_h - 75;
-            draw_set_color(make_color_rgb(26, 44, 34));
-            draw_roundrect_ext(sx + 16, stat_y, sx + slot_w - 16, stat_y + 54, 8, 8, false);
-            draw_set_color(make_color_rgb(46, 204, 113));
-            draw_roundrect_ext(sx + 16, stat_y, sx + slot_w - 16, stat_y + 54, 8, 8, true);
+            ui_box(sx + 16, stat_y, sx + slot_w - 16, stat_y + 54, make_color_rgb(26, 44, 34), make_color_rgb(46, 204, 113), 8);
             
             draw_set_halign(fa_center); draw_set_valign(fa_middle);
             draw_set_color(make_color_rgb(46, 204, 113));
@@ -4628,10 +2640,10 @@ function ui_draw_online_lobby_screen(state, mx, my) {
             draw_circle(sx + slot_w * 0.5, wait_cy - 40, 48, true);
             
             draw_set_color(make_color_rgb(80, 105, 140));
-            draw_text_transformed(sx + slot_w * 0.5, wait_cy - 40, "?", 2.2, 2.2, 0);
+            ui_text_scaled(sx + slot_w * 0.5, wait_cy - 40, "?", 2.2);
             
             draw_set_color(make_color_rgb(120, 150, 185));
-            draw_text_transformed(sx + slot_w * 0.5, wait_cy + 40, "WAITING FOR ALLY...", 1.15, 1.15, 0);
+            ui_text_scaled(sx + slot_w * 0.5, wait_cy + 40, "WAITING FOR ALLY...", 1.15);
             
             draw_set_color(make_color_rgb(80, 100, 130));
             draw_text(sx + slot_w * 0.5, wait_cy + 75, "Open slot for player on\nsame Wi-Fi network.");
@@ -4658,38 +2670,31 @@ function ui_draw_online_lobby_screen(state, mx, my) {
     if (state.is_host) {
         if (num_joined < 2) {
             // Disabled: waiting for at least 1 other player
-            draw_set_color(make_color_rgb(40, 45, 55));
-            draw_roundrect_ext(start_x, bottom_y, start_x + start_w, bottom_y + start_h, 10, 10, false);
-            draw_set_color(make_color_rgb(80, 85, 95));
-            draw_roundrect_ext(start_x, bottom_y, start_x + start_w, bottom_y + start_h, 10, 10, true);
+            ui_box(start_x, bottom_y, start_x + start_w, bottom_y + start_h, make_color_rgb(40, 45, 55), make_color_rgb(80, 85, 95), 10);
             
             draw_set_halign(fa_center); draw_set_valign(fa_middle);
             draw_set_color(make_color_rgb(170, 175, 185));
-            draw_text_transformed(start_x + start_w * 0.5, bottom_y + start_h * 0.5, "WAITING FOR OPERATIVES (Need 2-4 Players to Launch)", 1.1, 1.1, 0);
+            ui_text_scaled(start_x + start_w * 0.5, bottom_y + start_h * 0.5, "WAITING FOR OPERATIVES (Need 2-4 Players to Launch)", 1.1);
         } else {
             // Active: Host can launch!
-            draw_set_color(s_btn_hov ? make_color_rgb(46, 204, 113) : make_color_rgb(39, 174, 96));
-            draw_roundrect_ext(start_x, bottom_y, start_x + start_w, bottom_y + start_h, 10, 10, false);
-            draw_set_color(s_btn_hov ? c_yellow : c_white);
-            draw_roundrect_ext(start_x, bottom_y, start_x + start_w, bottom_y + start_h, 10, 10, true);
+            ui_box(start_x, bottom_y, start_x + start_w, bottom_y + start_h, s_btn_hov ? make_color_rgb(46, 204, 113) : make_color_rgb(39, 174, 96), s_btn_hov ? C_AMBER : c_white, 10);
             draw_roundrect_ext(start_x + 1, bottom_y + 1, start_x + start_w - 1, bottom_y + start_h - 1, 10, 10, true);
             
             draw_set_halign(fa_center); draw_set_valign(fa_middle);
             draw_set_color(s_btn_hov ? c_black : c_white);
-            draw_text_transformed(start_x + start_w * 0.5, bottom_y + start_h * 0.5, "LAUNCH MISSION (" + string(num_joined) + " OPERATIVES ASSEMBLED) [SPACE] >>", 1.15, 1.15, 0);
+            ui_text_scaled(start_x + start_w * 0.5, bottom_y + start_h * 0.5, "LAUNCH MISSION  -  " + string(num_joined) + " OPERATIVES   [ENTER]", 1.15);
         }
     } else {
         // Non-host Client view
-        draw_set_color(make_color_rgb(26, 38, 56));
-        draw_roundrect_ext(start_x, bottom_y, start_x + start_w, bottom_y + start_h, 10, 10, false);
-        draw_set_color(make_color_rgb(0, 180, 216));
-        draw_roundrect_ext(start_x, bottom_y, start_x + start_w, bottom_y + start_h, 10, 10, true);
+        ui_box(start_x, bottom_y, start_x + start_w, bottom_y + start_h, make_color_rgb(26, 38, 56), make_color_rgb(0, 180, 216), 10);
         
         draw_set_halign(fa_center); draw_set_valign(fa_middle);
         draw_set_color(c_white);
         var client_msg = (num_joined < 2) ? "WAITING FOR ANOTHER ALLY TO JOIN (1/4)..." : "WAITING FOR HOST TO LAUNCH MISSION (" + string(num_joined) + "/4 Ready)...";
-        draw_text_transformed(start_x + start_w * 0.5, bottom_y + start_h * 0.5, client_msg, 1.15, 1.15, 0);
+        ui_text_scaled(start_x + start_w * 0.5, bottom_y + start_h * 0.5, client_msg, 1.15);
     }
 }
+
+
 
 
