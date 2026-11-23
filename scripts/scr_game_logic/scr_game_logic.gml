@@ -40,6 +40,9 @@ function game_apply_setup_roster(state) {
     }
     
     state.num_players = clamp(state.setup_player_count, 1, 4);
+    if (variable_struct_exists(state, "storage") && state.round_number == 1 && state.phase == "player_actions") {
+        state.storage.gold = game_starting_gold(state.num_players);
+    }
     state.players = [];
     for (var i = 0; i < state.num_players; i++) {
         var c_idx = state.setup_player_classes[i] % array_length(char_classes);
@@ -197,6 +200,11 @@ function game_init_state(num_players = 4, chosen_class_indices = undefined, chos
     state.tower_hit_flash = [0, 0, 0, 0];
     state.pause_hover = -1;
     state.help_page = 0;
+    state.dying_aliens = [];
+    state.combat_arcs = [];
+    state.lane_pos = {};
+    state.pylon_rotation = 0;
+    state.ui_click_action = undefined;
 
     // Map data
     state.nodes = game_get_map_nodes();
@@ -215,10 +223,10 @@ function game_init_state(num_players = 4, chosen_class_indices = undefined, chos
     
     // Base & Towers (each can have a stationed defense weapon and its own manual powering cooldown)
     state.towers = [
-        { id: 0, name: "Tower 1", node_id: "tower_1", hp: 10, max_hp: 10, alive: true, weapon: undefined, manual_cooldown: 0, manual_powers_this_turn: 0 },
-        { id: 1, name: "Tower 2", node_id: "tower_2", hp: 10, max_hp: 10, alive: true, weapon: undefined, manual_cooldown: 0, manual_powers_this_turn: 0 },
-        { id: 2, name: "Tower 3", node_id: "tower_3", hp: 10, max_hp: 10, alive: true, weapon: undefined, manual_cooldown: 0, manual_powers_this_turn: 0 },
-        { id: 3, name: "Tower 4", node_id: "tower_4", hp: 10, max_hp: 10, alive: true, weapon: undefined, manual_cooldown: 0, manual_powers_this_turn: 0 }
+        { id: 0, name: "Tower 1", node_id: "tower_1", hp: 10, max_hp: 10, alive: true, rebuilt: false, weapon: undefined, manual_cooldown: 0, manual_powers_this_turn: 0 },
+        { id: 1, name: "Tower 2", node_id: "tower_2", hp: 10, max_hp: 10, alive: true, rebuilt: false, weapon: undefined, manual_cooldown: 0, manual_powers_this_turn: 0 },
+        { id: 2, name: "Tower 3", node_id: "tower_3", hp: 10, max_hp: 10, alive: true, rebuilt: false, weapon: undefined, manual_cooldown: 0, manual_powers_this_turn: 0 },
+        { id: 3, name: "Tower 4", node_id: "tower_4", hp: 10, max_hp: 10, alive: true, rebuilt: false, weapon: undefined, manual_cooldown: 0, manual_powers_this_turn: 0 }
     ];
     
     // Shared Base Storage (Starting gold is 0)
@@ -229,12 +237,12 @@ function game_init_state(num_players = 4, chosen_class_indices = undefined, chos
         metal: 0,
         crystals: 0,
         power_gem: 0,
-        gold: 0
+        gold: game_starting_gold(state.num_players)
     };
     
     // Weapons built & Owned Blueprints
     state.weapons = [];
-    state.blueprints = [];
+    state.blueprints = [game_get_starter_blueprint()]; // the starter blueprint is permanent
     
     // Weapon blueprint shop deck & display (Deck of cards system)
     state.shop_catalog = game_get_weapon_catalog();
@@ -246,7 +254,7 @@ function game_init_state(num_players = 4, chosen_class_indices = undefined, chos
             array_push(state.shop_available_items, array_pop(state.shop_deck));
         }
     }
-    state.shop_reroll_cost = 3;
+    state.shop_reroll_cost = 5; // flat price per reroll
     state.days_without_reroll = 0;
     state.rerolled_this_day = false;
     state.shop_reroll_hover = false;
@@ -270,12 +278,12 @@ function game_init_state(num_players = 4, chosen_class_indices = undefined, chos
     state.alien_uid = 1;
     
     // Log ticker
-    state.action_logs = ["Game started! Defend the 4 Base Towers across 17 Waves."];
+    state.action_logs = ["Game started! Defend the 4 Base Towers for 20 days."];
     
     // Settings & Display state
     state.settings = {
         display_mode: "borderless", // "borderless" | "fullscreen" | "windowed"
-        resolution_idx: 0,          // 0: 1920x1080, 1: 1600x900, 2: 1366x768, 3: 1280x720
+        resolution_idx: 3,          // index into state.resolutions (3 = 1920x1080)
         sfx_volume: 0.8,
         music_volume: 0.5,
         slider_dragging: false,
@@ -283,10 +291,13 @@ function game_init_state(num_players = 4, chosen_class_indices = undefined, chos
         screen_shake: true
     };
     state.resolutions = [
-        [1920, 1080, "1920 x 1080"],
-        [1600, 900,  "1600 x 900"],
+        [1280, 720,  "1280 x 720"],
         [1366, 768,  "1366 x 768"],
-        [1280, 720,  "1280 x 720"]
+        [1600, 900,  "1600 x 900"],
+        [1920, 1080, "1920 x 1080"],
+        [2560, 1440, "2560 x 1440"],
+        [3200, 1800, "3200 x 1800"],
+        [3840, 2160, "3840 x 2160 (4K)"]
     ];
     state.btn_settings_hover = false;
     state.settings_mode_borderless_hover = false;
@@ -498,12 +509,12 @@ function game_apply_display_settings(mode, res_w, res_h) {
         window_enable_borderless_fullscreen(false);
         window_set_fullscreen(false);
         window_set_showborder(true);
+        // Keep the requested 16:9 size, but shrink it to fit the monitor (leaving room for the taskbar)
         var disp_w = display_get_width();
         var disp_h = display_get_height();
-        var target_w = res_w;
-        var target_h = res_h;
-        if (target_w >= disp_w && disp_w > 1280) target_w = min(res_w, 1600);
-        if (target_h >= disp_h && disp_h > 720) target_h = min(res_h, 900);
+        var fit = min(1, (disp_w * 0.96) / res_w, (disp_h * 0.9) / res_h);
+        var target_w = floor(res_w * fit);
+        var target_h = floor(res_h * fit);
         window_set_size(target_w, target_h);
         window_center();
         surface_resize(application_surface, target_w, target_h);
@@ -617,7 +628,7 @@ function game_player_move(state, player, target_node) {
     player.node = target_node;
     var node_name = new_node.name;
     game_log(state, player.name + " moved to " + node_name + " (" + string(move_cost) + " Energy spent).");
-    game_sfx(state, "step");
+    game_sfx(state, "move");
     
     // Auto-deposit upon reaching main_base
     if (target_node == "main_base") {
@@ -630,6 +641,7 @@ function game_player_move(state, player, target_node) {
 
 /// @desc Starts the pawn glide animation between two nodes (used locally and when a snapshot reports a move)
 function game_player_anim_move(state, player, from_key, to_key) {
+    if (sim_active()) return;
     var old_node = state.nodes[$ from_key];
     var new_node = state.nodes[$ to_key];
     if (is_undefined(new_node)) return;
@@ -659,19 +671,21 @@ function game_player_deposit(state, player) {
         var k = keys[i];
         var amt = player.backpack[$ k];
         if (amt > 0) {
-            state.storage[$ k] += amt;
+            // Gathered loot is credited to team storage the moment it's drawn; the pack is just a tally
             player.backpack[$ k] = 0;
             total_deposited += amt;
         }
     }
     if (total_deposited > 0) {
-        game_log(state, player.name + " deposited " + string(total_deposited) + " items into Base Storage.");
+        game_log(state, player.name + " unpacked " + string(total_deposited) + " items at the Main Base.");
+        game_sfx(state, "deposit", 0.8);
         game_trigger_player_action(state, player, "deposit", "+STORED (" + string(total_deposited) + ")", make_color_rgb(100, 220, 255));
     }
 }
 
 /// @desc Spawns dynamic particle burst or ripple on the board
 function game_spawn_board_action_effect(state, ex, ey, type, color = c_white) {
+    if (sim_active()) return;
     if (!variable_struct_exists(state, "board_action_effects") || !is_array(state.board_action_effects)) {
         state.board_action_effects = [];
     }
@@ -837,6 +851,7 @@ function game_player_gather(state, player) {
         state.storage[$ card.resource] += amt;
         player.backpack[$ card.resource] += amt;
         var rname = state.nodes[$ player.node].name;
+        game_sfx(state, (deck_key == "forest") ? "gather_wood" : ((deck_key == "cave_3") ? "gather_crystal" : "gather_stone"), 0.9);
         game_log(state, player.name + " drew " + card.name + " at " + rname + " (Added to Team Pool)!");
         game_sfx(state, "gather");
         
@@ -867,8 +882,8 @@ function game_player_craft_metal(state, player) {
         game_log(state, "Need " + string(cost) + " Energy to craft Metal!");
         return false;
     }
-    if (player.node != "main_base" && player.node != "workstation") {
-        game_log(state, "Crafting is only available at Main Base or Workstation!");
+    if (player.node != "workstation") {
+        game_log(state, "Forge Metal at the Workstation.");
         return false;
     }
     if (state.storage.stone < 1 || state.storage.scrap < 1) {
@@ -881,7 +896,7 @@ function game_player_craft_metal(state, player) {
     state.storage.scrap -= 1;
     state.storage.metal += 1;
     game_log(state, player.name + " forged 1 Metal from 1 Stone and 1 Scrap (" + string(cost) + " Energy spent)!");
-    game_sfx(state, "repair");
+    game_sfx(state, "forge");
     game_trigger_player_action(state, player, "craft", "+1 METAL FORGED", make_color_rgb(207, 216, 220));
     game_check_player_energy_depleted(state, player);
     return true;
@@ -899,12 +914,9 @@ function game_reroll_shop(state, player, is_free = false) {
             return false;
         }
         state.storage.gold -= state.shop_reroll_cost;
-        var paid = state.shop_reroll_cost;
-        state.shop_reroll_cost += 2; // Keeps costing 2 more every time
-        state.days_without_reroll = 0;
         state.rerolled_this_day = true;
-        game_sfx(state, "coin");
-        game_log(state, player.name + " paid " + string(paid) + " Gold to reroll shop! (Next reroll: " + string(state.shop_reroll_cost) + "g)");
+        game_sfx(state, "reroll");
+        game_log(state, player.name + " paid " + string(state.shop_reroll_cost) + " Gold to reroll the shop.");
     }
     
     // Cycle currently displayed cards into discard pile
@@ -1111,53 +1123,84 @@ function game_player_craft_blueprint(state, player, bp_idx, target_tower_idx) {
     array_push(state.weapons, new_w);
     
     // Remove the forged blueprint
-    array_delete(state.blueprints, bp_idx, 1);
+    if (!(bp[$ "starter"] ?? false)) array_delete(state.blueprints, bp_idx, 1); // the starter blueprint is never used up
     
     game_log(state, player.name + " forged " + bp.name + " at the Workstation and mounted it to " + tower.name + "!");
-    game_sfx(state, "buy");
+    game_sfx(state, "forge");
     game_trigger_player_action(state, player, "forge", "MOUNTED " + string_upper(bp.name), make_color_rgb(100, 230, 255));
     game_check_player_energy_depleted(state, player);
     return true;
 }
 
+/// @desc Materials returned when a mounted weapon is demolished: 75% of its forge cost at full health, scaled by its health
+function game_demolish_refund(w) {
+    var res = {};
+    if (is_undefined(w) || is_undefined(w[$ "cost_res"])) return res;
+    var pct = 0.75 * clamp(w.hp / max(1, w.max_hp), 0, 1);
+    var keys = variable_struct_get_names(w.cost_res);
+    for (var k = 0; k < array_length(keys); k++) {
+        var amt = floor(w.cost_res[$ keys[k]] * pct + 0.5);
+        if (amt > 0) res[$ keys[k]] = amt;
+    }
+    return res;
+}
+
+/// @desc "2 Metal, 1 Scrap" style list of a resource struct
+function game_res_list_string(res) {
+    var names = { wood: "Wood", scrap: "Scrap", stone: "Stone", metal: "Metal", crystals: "Crystals", power_gem: "Power Gem" };
+    var keys = variable_struct_get_names(res);
+    array_sort(keys, true);
+    var out = "";
+    for (var k = 0; k < array_length(keys); k++) {
+        out += ((out == "") ? "" : ", ") + string(res[$ keys[k]]) + " " + (names[$ keys[k]] ?? keys[k]);
+    }
+    return (out == "") ? "nothing" : out;
+}
+
+/// @desc Demolishes the weapon on the operative's tower and returns part of its materials (see game_demolish_refund)
 function game_player_dismantle_weapon(state, player, tower_idx) {
     var cost = (variable_struct_exists(player, "character") && player.character.id == "scout") ? 2 : 1;
     if (player.energy < cost) {
-        game_log(state, "Need " + string(cost) + " Energy to dismantle weapon!");
+        game_log(state, "Need " + string(cost) + " Energy to demolish a weapon!");
         return false;
     }
     if (player.node != ("tower_" + string(tower_idx + 1))) {
-        game_log(state, "Must be stationed at Tower " + string(tower_idx + 1) + " to dismantle its weapon!");
+        game_log(state, "Must be stationed at Tower " + string(tower_idx + 1) + " to demolish its weapon!");
         return false;
     }
-    
+
     var tower = state.towers[tower_idx];
     if (is_undefined(tower.weapon) || !tower.weapon.alive || tower.weapon.hp <= 0) {
-        game_log(state, "No active weapon to dismantle at " + tower.name + "!");
+        game_log(state, "No active weapon to demolish at " + tower.name + "!");
         return false;
     }
-    
+
     var old_w = tower.weapon;
-    var w_name = old_w.name;
+    var refund = game_demolish_refund(old_w);
+    var pct = round(75 * clamp(old_w.hp / max(1, old_w.max_hp), 0, 1));
     old_w.alive = false;
     tower.weapon = undefined;
     tower.manual_cooldown = 0;
     tower.manual_powers_this_turn = 0;
-    
+
     for (var wi = array_length(state.weapons) - 1; wi >= 0; wi--) {
         if (state.weapons[wi] == old_w) {
             array_delete(state.weapons, wi, 1);
             break;
         }
     }
-    
-    // Salvage 1 scrap
-    state.storage.scrap += 1;
+
+    var rk = variable_struct_get_names(refund);
+    var total = 0;
+    for (var k = 0; k < array_length(rk); k++) {
+        state.storage[$ rk[k]] = (state.storage[$ rk[k]] ?? 0) + refund[$ rk[k]];
+        total += refund[$ rk[k]];
+    }
     player.energy -= cost;
-    
-    game_log(state, player.name + " dismantled and destroyed the " + w_name + " at " + tower.name + " (+1 Scrap salvaged). Mount is now empty!");
-    game_sfx(state, "hit");
-    game_trigger_player_action(state, player, "dismantle", "+1 SCRAP (DISMANTLED)", make_color_rgb(255, 120, 120));
+
+    game_log(state, player.name + " demolished the " + old_w.name + " at " + tower.name + " and salvaged " + game_res_list_string(refund) + " (" + string(pct) + "% of its materials). The hardpoint is free!");
+    game_sfx(state, "demolish");
+    game_trigger_player_action(state, player, "dismantle", "+" + string(total) + " SALVAGED", make_color_rgb(255, 170, 120));
     game_check_player_energy_depleted(state, player);
     return true;
 }
@@ -1333,73 +1376,98 @@ function game_player_town_trade(state, player, res_type, amount) {
     state.storage.gold += total_gold;
     var bonus_str = (bonus > 0) ? (" (+" + string(bonus * amount) + " Favor Bonus!)") : "";
     game_log(state, player.name + " sold " + string(amount) + " " + res_type + " for " + string(total_gold) + " Gold" + bonus_str + " (" + string(cost) + " Energy spent).");
-    game_sfx(state, "coin");
+    game_sfx(state, "sell");
     game_trigger_player_action(state, player, "trade", "+" + string(total_gold) + " GOLD", make_color_rgb(255, 215, 0));
     game_check_player_energy_depleted(state, player);
     return true;
 }
 
-function game_player_manual_fire(state, player, target_alien_idx) {
-    var cur_tower_idx = -1;
-    if (player.node == "tower_1") cur_tower_idx = 0;
-    else if (player.node == "tower_2") cur_tower_idx = 1;
-    else if (player.node == "tower_3") cur_tower_idx = 2;
-    else if (player.node == "tower_4") cur_tower_idx = 3;
-    
+/// @desc Shots a weapon fires when powered (same as in the defense phase): Turret 2, Flamethrower 3, others 1
+function game_weapon_shots(w) {
+    switch (w.catalog_id) {
+        case "turret": return 2;
+        case "flamethrower": return 3;
+        case "gatling_gun": return 5;
+    }
+    return 1;
+}
+
+/// @desc Fires the tower weapon the operative stands on.
+/// targets: array of alien uids, one per shot (the last pick repeats if there are fewer picks than shots),
+/// or a single active-zone index (legacy). The Tesla ignores picks and hits every alien.
+function game_player_manual_fire(state, player, targets) {
+    var cur_tower_idx = game_player_tower_idx(player);
     if (cur_tower_idx < 0) {
         game_log(state, "Move onto Tower 1, 2, 3, or 4 to fire its mounted weapon!");
         return false;
     }
-    
     var tower = state.towers[cur_tower_idx];
     if (is_undefined(tower.weapon) || !tower.weapon.alive || tower.weapon.hp <= 0) {
         game_log(state, tower.name + " has no mounted defense weapon!");
         return false;
     }
-    
     var w = tower.weapon;
     if (w.damage <= 0) {
         game_log(state, w.name + " is a support structure and cannot directly fire!");
         return false;
     }
-    
     if (tower.manual_cooldown > 0) {
-        var rem_str = (tower.manual_cooldown == 1) ? "1 turn" : (string(tower.manual_cooldown) + " turns");
-        game_log(state, tower.name + "'s " + w.name + " is cooling down (" + rem_str + " remaining)!");
+        game_log(state, tower.name + "'s " + w.name + " is cooling down (" + string(tower.manual_cooldown) + " day(s) remaining)!");
         return false;
     }
-    
-    var cost = 2;
-    // Overcharge Pylon reduces manual reuse cost to 1
-    for (var i = 0; i < array_length(state.weapons); i++) {
-        if (state.weapons[i].alive && state.weapons[i].catalog_id == "overcharge_pylon") {
-            cost = 1;
-            break;
-        }
-    }
-    if (variable_struct_exists(player, "character")) {
-        if (player.character.id == "gunner") {
-            cost = 1; // Gunner firing weapon costs only 1 energy instead of 2
-        } else if (player.character.id == "scout") {
-            cost = 2; // Scout tasks cost 2 energy
-        }
-    }
-    
+    var cost = game_fire_cost(state, player);
     if (player.energy < cost) {
         game_log(state, "Need " + string(cost) + " Energy to fire " + w.name + "!");
         return false;
     }
-    
     if (array_length(state.active_zone) == 0) {
         game_log(state, "No active aliens to attack!");
         return false;
     }
-    
+
+    // Resolve the picks into alien uids
+    var uids = [];
+    if (is_array(targets)) {
+        for (var i = 0; i < array_length(targets); i++) array_push(uids, real(targets[i]));
+    } else if (is_real(targets) && targets >= 0 && targets < array_length(state.active_zone)) {
+        array_push(uids, state.active_zone[targets].uid);
+    }
+    if (array_length(uids) == 0 && w.catalog_id != "tesla") {
+        game_log(state, "Pick an alien to fire at.");
+        return false;
+    }
+
     player.energy -= cost;
-    game_apply_weapon_damage(state, w, target_alien_idx);
+    w.bonus_damage = game_overcharge_bonus(state, cur_tower_idx);
+    if (w.catalog_id == "tesla") {
+        for (var a = 0; a < array_length(state.active_zone); a++) {
+            var tgt = state.active_zone[a];
+            if (!tgt.alive) continue;
+            var d = w.damage + w.bonus_damage;
+            if (tgt.vulnerable) d += 1;
+            if (tgt.catalog_id == "armorback") d = max(1, d - 1);
+            if (tgt.catalog_id == "apex_predator") d = min(10, d);
+            tgt.hp -= d;
+            tgt.tesla_weakened = true;
+            game_fx(state, { k: "dmg", x: 960, y: 260, t: "-" + string(d), c: make_color_rgb(180, 255, 255), uid: tgt.uid, big: false });
+            if (tgt.hp <= 0) game_alien_kill(state, a, w, "");
+        }
+        for (var a = array_length(state.active_zone) - 1; a >= 0; a--) if (!state.active_zone[a].alive) array_delete(state.active_zone, a, 1);
+        game_log(state, "Tesla discharge hit every alien at the walls!");
+    } else {
+        var shots = game_weapon_shots(w);
+        for (var s = 0; s < shots; s++) {
+            if (array_length(state.active_zone) == 0) break;
+            var want = uids[min(s, array_length(uids) - 1)];
+            var idx = -1;
+            for (var a = 0; a < array_length(state.active_zone); a++) if (state.active_zone[a].uid == want) { idx = a; break; }
+            if (idx < 0) idx = 0; // picked alien already died: the shot goes to the next alien in line
+            game_apply_weapon_damage(state, w, idx);
+        }
+    }
     tower.manual_powers_this_turn += 1;
-    var next_cd_str = (tower.manual_powers_this_turn == 1) ? "1-turn" : (string(tower.manual_powers_this_turn) + "-turn");
-    game_log(state, player.name + " powered " + w.name + " at " + tower.name + " (" + string(cost) + " Energy spent, powered " + string(tower.manual_powers_this_turn) + "x - " + next_cd_str + " cooldown next round).");
+    game_log(state, player.name + " powered " + w.name + " at " + tower.name + " (" + string(cost) + " Energy, powered " + string(tower.manual_powers_this_turn) + "x - " + string(tower.manual_powers_this_turn) + "-day cooldown next round).");
+    game_sfx(state, (w.catalog_id == "tesla") ? "zap" : ("fire_" + w.catalog_id));
     game_trigger_player_action(state, player, "fire", "WEAPON FIRED!", make_color_rgb(255, 170, 0));
     game_check_player_energy_depleted(state, player);
     return true;
@@ -1447,7 +1515,7 @@ function game_spawn_wave_for_round(state, rnum) {
         wave_list = state.waves[rnum - 1];
     } else {
         // Endless mode: procedural escalation
-        var extra = rnum - 17;
+        var extra = rnum - array_length(state.waves);
         wave_list = [3, 3, 3];
         for (var i = 0; i < extra; i++) {
             array_push(wave_list, (i % 2 == 0) ? 2 : 3);
@@ -1475,147 +1543,119 @@ function game_has_active_scout(state) {
 
 function game_apply_weapon_damage(state, w, target_idx) {
     if (target_idx < 0 || target_idx >= array_length(state.active_zone)) return;
-    
-    // Scout Priority Rule: If any Scout is present, Scout must be targeted first!
-    var has_scout = game_has_active_scout(state);
-    if (has_scout && state.active_zone[target_idx].catalog_id != "scout") {
+
+    // Scout Priority Rule: if any Scout is present it must be targeted first
+    if (game_has_active_scout(state) && state.active_zone[target_idx].catalog_id != "scout") {
         for (var i = 0; i < array_length(state.active_zone); i++) {
-            if (state.active_zone[i].alive && state.active_zone[i].catalog_id == "scout") {
-                target_idx = i;
-                break;
-            }
+            if (state.active_zone[i].alive && state.active_zone[i].catalog_id == "scout") { target_idx = i; break; }
         }
     }
-    
+
     var target = state.active_zone[target_idx];
     var dmg = w.damage + w.bonus_damage;
-    if (target.vulnerable) dmg += 1; // Flamethrower vulnerability
-    
-    // Armorback ability: damage reduced by 1
-    if (target.catalog_id == "armorback") dmg = max(1, dmg - 1);
-    
-    // Apex Predator ability: max 10 damage from single attack
-    if (target.catalog_id == "apex_predator") dmg = min(10, dmg);
-    
+    if (target.vulnerable) dmg += 1;                               // Flamethrower vulnerability
+    if (target.catalog_id == "armorback") dmg = max(1, dmg - 1);    // Armorback plating
+    if (target.catalog_id == "apex_predator") dmg = min(10, dmg);   // Apex cap
+
     var overkill = max(0, dmg - target.hp);
     target.hp -= dmg;
     game_log(state, w.name + " dealt " + string(dmg) + " dmg to " + target.name + "!");
     var d_anc = game_combat_alien_anchor(state, target_idx);
     game_fx(state, { k: "dmg", x: d_anc[0], y: d_anc[1] - 30, t: "-" + string(dmg), c: (target.hp <= 0) ? make_color_rgb(255, 220, 80) : c_white, uid: target.uid, big: (dmg >= 8) });
-    
-    // Cryo Emitter freeze
+
     if (w.catalog_id == "cryo_emitter") {
         target.frozen = true;
         game_log(state, target.name + " is FROZEN (deals 0 dmg on next attack)!");
     }
-    
-    // Lazer Gun damage increase
     if (w.catalog_id == "lazer_gun") {
         w.damage += 1;
         game_log(state, "Lazer Gun calibrated! Damage increased to " + string(w.damage) + ".");
     }
-    
-    // Flamethrower vulnerability
-    if (w.catalog_id == "flamethrower") {
-        target.vulnerable = true;
-    }
-    
-    // Handle primary target death
-    if (target.hp <= 0) {
-        target.alive = false;
-        game_log(state, target.name + " destroyed!");
-        game_sfx(state, "kill");
-        game_fx(state, { k: "shake", v: 6 });
-        
-        // Saboteur: deals 2 damage to killer weapon
-        if (target.catalog_id == "saboteur") {
-            w.hp -= 2;
-            game_log(state, "Saboteur death explosion dealt 2 dmg to " + w.name + "!");
-            if (w.hp <= 0) {
-                w.alive = false;
-                game_log(state, w.name + " was destroyed by Saboteur!");
-            }
-        }
-        
-        // Railgun overkill carryover
-        if (w.catalog_id == "railgun" && overkill > 0) {
-            for (var j = 0; j < array_length(state.active_zone); j++) {
-                if (state.active_zone[j].alive && state.active_zone[j].uid != target.uid) {
-                    var second_target = state.active_zone[j];
-                    second_target.hp -= overkill;
-                    game_log(state, "Railgun pierce dealt " + string(overkill) + " surplus dmg to " + second_target.name + "!");
-                    if (second_target.hp <= 0) {
-                        second_target.alive = false;
-                        game_log(state, second_target.name + " destroyed!");
-                    }
-                    break;
-                }
-            }
+    if (w.catalog_id == "flamethrower") target.vulnerable = true;
+
+    if (target.hp <= 0) game_alien_kill(state, target_idx, w, "");
+
+    // Railgun: overkill is split between the nearest living aliens to the left and right.
+    // If only one side has an alien, it takes all of it.
+    if (w.catalog_id == "railgun" && overkill > 0) {
+        var li = game_alien_neighbor(state, target_idx, -1);
+        var ri = game_alien_neighbor(state, target_idx, 1);
+        if (li >= 0 && ri >= 0) {
+            var half_l = ceil(overkill / 2);
+            game_log(state, "Railgun overkill pierces both ways (" + string(half_l) + " / " + string(overkill - half_l) + ")!");
+            game_damage_alien(state, li, half_l, w, target_idx, "beam", make_color_rgb(0, 229, 255));
+            game_damage_alien(state, ri, overkill - half_l, w, target_idx, "beam", make_color_rgb(0, 229, 255));
+        } else if (li >= 0 || ri >= 0) {
+            var one = (li >= 0) ? li : ri;
+            game_log(state, "Railgun overkill funnels " + string(overkill) + " dmg into the next alien!");
+            game_damage_alien(state, one, overkill, w, target_idx, "beam", make_color_rgb(0, 229, 255));
         }
     }
-    
-    // Plasma Mortar: 3 splash damage prioritizing the aliens to the left and right of primary target
+
+    // Plasma Mortar: 3 splash damage to two more aliens, nearest neighbours first
     if (w.catalog_id == "plasma_mortar") {
-        var splash_candidates = [];
-        
-        // 1. Prioritize Left neighbor (target_idx - 1)
-        if (target_idx - 1 >= 0 && state.active_zone[target_idx - 1].alive) {
-            array_push(splash_candidates, state.active_zone[target_idx - 1]);
-        }
-        
-        // 2. Prioritize Right neighbor (target_idx + 1)
-        if (target_idx + 1 < array_length(state.active_zone) && state.active_zone[target_idx + 1].alive) {
-            array_push(splash_candidates, state.active_zone[target_idx + 1]);
-        }
-        
-        // 3. If under 2 targets, check 2 steps away (target_idx - 2, target_idx + 2)
-        if (array_length(splash_candidates) < 2 && target_idx - 2 >= 0 && state.active_zone[target_idx - 2].alive) {
-            array_push(splash_candidates, state.active_zone[target_idx - 2]);
-        }
-        if (array_length(splash_candidates) < 2 && target_idx + 2 < array_length(state.active_zone) && state.active_zone[target_idx + 2].alive) {
-            array_push(splash_candidates, state.active_zone[target_idx + 2]);
-        }
-        
-        // 4. Any remaining alive alien that isn't the primary target
-        for (var a = 0; a < array_length(state.active_zone); a++) {
-            if (array_length(splash_candidates) >= 2) break;
-            var other_al = state.active_zone[a];
-            if (other_al.alive && other_al.uid != target.uid) {
-                var exists_already = false;
-                for (var sc = 0; sc < array_length(splash_candidates); sc++) {
-                    if (splash_candidates[sc].uid == other_al.uid) exists_already = true;
-                }
-                if (!exists_already) array_push(splash_candidates, other_al);
-            }
-        }
-        
-        // Apply 3 splash damage to each prioritized splash target
-        for (var s = 0; s < array_length(splash_candidates); s++) {
-            var sal = splash_candidates[s];
-            var s_dmg = 3;
-            if (sal.catalog_id == "armorback") s_dmg = max(1, s_dmg - 1);
-            if (sal.catalog_id == "apex_predator") s_dmg = min(10, s_dmg);
-            sal.hp -= s_dmg;
-            game_log(state, "Plasma Mortar splash dealt " + string(s_dmg) + " dmg to " + sal.name + " (adjacent)! (HP: " + string(max(0, sal.hp)) + "/" + string(sal.max_hp) + ")");
-            if (sal.hp <= 0) {
-                sal.alive = false;
-                game_log(state, sal.name + " destroyed by splash damage!");
-                if (sal.catalog_id == "saboteur") {
-                    w.hp -= 2;
-                    game_log(state, "Saboteur death explosion dealt 2 dmg to " + w.name + "!");
-                    if (w.hp <= 0) {
-                        w.alive = false;
-                        game_log(state, w.name + " was destroyed by Saboteur!");
-                    }
-                }
-            }
+        var picks = [];
+        var l1 = game_alien_neighbor(state, target_idx, -1);
+        var r1 = game_alien_neighbor(state, target_idx, 1);
+        if (l1 >= 0) array_push(picks, l1);
+        if (r1 >= 0) array_push(picks, r1);
+        if (array_length(picks) < 2 && l1 >= 0) { var l2 = game_alien_neighbor(state, l1, -1); if (l2 >= 0) array_push(picks, l2); }
+        if (array_length(picks) < 2 && r1 >= 0) { var r2 = game_alien_neighbor(state, r1, 1); if (r2 >= 0) array_push(picks, r2); }
+        for (var s = 0; s < array_length(picks); s++) {
+            game_damage_alien(state, picks[s], 3, w, target_idx, "lob", make_color_rgb(210, 60, 255));
         }
     }
-    
-    // Clean dead aliens from active zone
+
+    // Clean dead aliens from the active zone
     for (var i = array_length(state.active_zone) - 1; i >= 0; i--) {
-        if (!state.active_zone[i].alive) {
-            array_delete(state.active_zone, i, 1);
+        if (!state.active_zone[i].alive) array_delete(state.active_zone, i, 1);
+    }
+}
+
+/// @desc Nearest living alien to the left (dir -1) or right (dir 1) of an index, or -1
+function game_alien_neighbor(state, idx, dir) {
+    var i = idx + dir;
+    while (i >= 0 && i < array_length(state.active_zone)) {
+        if (state.active_zone[i].alive && state.active_zone[i].hp > 0) return i;
+        i += dir;
+    }
+    return -1;
+}
+
+/// @desc Secondary damage (splash / pierce) with a visible arc from the source alien
+function game_damage_alien(state, idx, dmg, w, from_idx, arc_style, arc_col) {
+    if (idx < 0 || idx >= array_length(state.active_zone) || dmg <= 0) return;
+    var al = state.active_zone[idx];
+    if (!al.alive) return;
+    if (al.catalog_id == "armorback") dmg = max(1, dmg - 1);
+    if (al.catalog_id == "apex_predator") dmg = min(10, dmg);
+    var a0 = game_combat_alien_anchor(state, from_idx);
+    var a1 = game_combat_alien_anchor(state, idx);
+    game_fx(state, { k: "arc", x1: a0[0], y1: a0[1], x2: a1[0], y2: a1[1], c: arc_col, s: arc_style });
+    al.hp -= dmg;
+    game_fx(state, { k: "dmg", x: a1[0], y: a1[1] - 30, t: "-" + string(dmg), c: arc_col, uid: al.uid, big: false });
+    game_fx(state, { k: "impact", x: a1[0], y: a1[1], o: "player", s: w.catalog_id });
+    game_log(state, w.name + " " + ((arc_style == "beam") ? "pierce" : "splash") + " dealt " + string(dmg) + " dmg to " + al.name + "! (HP: " + string(max(0, al.hp)) + "/" + string(al.max_hp) + ")");
+    if (al.hp <= 0) game_alien_kill(state, idx, w, "");
+}
+
+/// @desc Marks an alien dead, plays its death animation everywhere, applies on-death abilities
+function game_alien_kill(state, idx, killer_weapon, cause) {
+    var al = state.active_zone[idx];
+    if (!al.alive) return;
+    al.alive = false;
+    al.hp = min(al.hp, 0);
+    var anc = game_combat_alien_anchor(state, idx);
+    game_fx(state, { k: "death", uid: al.uid, cat: al.catalog_id, tier: al.tier, x: anc[0], y: anc[1], name: al.name, mh: al.max_hp });
+    game_log(state, al.name + " destroyed" + cause + "!");
+    game_sfx(state, "kill");
+    game_fx(state, { k: "shake", v: 6 });
+    if (al.catalog_id == "saboteur" && !is_undefined(killer_weapon) && killer_weapon.alive) {
+        killer_weapon.hp -= 2;
+        game_log(state, "Saboteur death explosion dealt 2 dmg to " + killer_weapon.name + "!");
+        if (killer_weapon.hp <= 0) {
+            killer_weapon.alive = false;
+            game_log(state, killer_weapon.name + " was destroyed by Saboteur!");
         }
     }
 }
@@ -1753,24 +1793,8 @@ function game_start_weapons_attack_phase(state) {
     if (array_length(state.active_zone) == 0) {
         state.modal = undefined;
         if (state.phase != "game_over" && state.phase != "victory") {
+            game_log(state, "No hostiles at the walls tonight - the squad rests.");
             game_advance_wave_phase(state);
-            
-            // Check incoming aliens in the upcoming wave
-            var upcoming_count = array_length(state.spawn_zone);
-            if (upcoming_count == 0 && array_length(state.active_zone) > 0) {
-                upcoming_count = array_length(state.active_zone);
-            }
-            
-            var arriving_str = "";
-            if (upcoming_count == 1) {
-                arriving_str = " An alien is arriving!";
-            } else if (upcoming_count > 1) {
-                arriving_str = " " + string(upcoming_count) + " aliens are arriving!";
-            }
-            
-            game_popup(state, "DAY " + string(state.round_number) + "  //  ALL CLEAR", "No hostiles at the base. Energy restored." + arriving_str, make_color_rgb(105, 240, 174), 200);
-            
-            game_log(state, "No hostiles detected and everyone has more energy this new day." + arriving_str);
         }
         return;
     }
@@ -1859,9 +1883,7 @@ function game_start_weapons_attack_phase(state) {
                 }
             }
             
-            var shots = 1;
-            if (w.catalog_id == "turret") shots = 2;
-            else if (w.catalog_id == "flamethrower") shots = 3;
+            var shots = game_weapon_shots(w);
             
             state.tower_weapon_shots[t] = shots;
             state.tower_weapon_max_shots[t] = shots;
@@ -1918,12 +1940,12 @@ function game_combat_fire_tower_at_alien(state, target_idx) {
         weapon: w,
         damage: dmg,
         progress: 0.0,
-        speed: 0.045,
+        speed: (w.catalog_id == "gatling_gun") ? 0.085 : 0.045,
         catalog_id: w.catalog_id
     });
     
     state.tower_weapon_shots[t] -= 1;
-    game_sfx(state, "shoot");
+    game_sfx(state, "fire_" + w.catalog_id);
     
     // Check if this weapon has depleted its shots this wave
     if (state.tower_weapon_shots[t] <= 0) {
@@ -1966,7 +1988,7 @@ function game_combat_discharge_tesla(state) {
         if (tgt.catalog_id == "apex_predator") t_dmg = min(10, t_dmg);
         tgt.hp -= t_dmg;
         tgt.tesla_weakened = true;
-        if (tgt.hp <= 0) tgt.alive = false;
+        if (tgt.hp <= 0) game_alien_kill(state, a, w, "");
 
         // Electric impact + damage number on each alien
         var anc = game_combat_alien_anchor(state, a);
@@ -1977,9 +1999,17 @@ function game_combat_discharge_tesla(state) {
         if (!state.active_zone[a].alive) array_delete(state.active_zone, a, 1);
     }
     
+    if (!is_undefined(state[$ "volley"])) {
+        // Day-time volley: the shock stays on every alien until it attacks tonight
+        state.tower_weapon_shots = [0, 0, 0, 0];
+        state.tower_weapon_used = [true, true, true, true];
+        state.combat_selected_tower = -1;
+        state.volley_end_timer = 70;
+        return true;
+    }
     state.tower_weapon_shots[t] = 0;
     state.tower_weapon_used[t] = true;
-    
+
     // Auto-select next unused weapon tower
     var next_t = -1;
     for (var i = 0; i < 4; i++) {
@@ -2022,6 +2052,7 @@ function game_start_alien_attack_phase(state) {
     state.alien_attack_delay = 15;
     
     game_log(state, "--- ALIEN RETALIATION PHASE ---");
+    game_popup(state, "INCOMING FIRE", "The swarm is attacking the walls - weapons on a tower absorb hits first.", make_color_rgb(255, 84, 84), 80);
     
     // Clean dead aliens
     for (var i = array_length(state.active_zone) - 1; i >= 0; i--) {
@@ -2192,16 +2223,14 @@ function game_apply_projectile_impact(state, p) {
         var shield = state.weapons[shield_idx];
         shield.hp -= atk_dmg;
         game_log(state, "Shield Generator absorbed " + string(atk_dmg) + " dmg from " + alien.name + "!");
-        game_sfx(state, "hit");
+        game_sfx(state, "shield");
         if (shield.hp <= 0) {
             shield.alive = false;
             game_log(state, "Shield Generator OVERLOAD! Discharge deals 4 dmg to all aliens!");
             for (var a = 0; a < array_length(state.active_zone); a++) {
+                if (!state.active_zone[a].alive) continue;
                 state.active_zone[a].hp -= 4;
-                if (state.active_zone[a].hp <= 0) {
-                    state.active_zone[a].alive = false;
-                    game_log(state, state.active_zone[a].name + " destroyed by Shield discharge!");
-                }
+                if (state.active_zone[a].hp <= 0) game_alien_kill(state, a, undefined, " by the Shield discharge");
             }
         }
         return;
@@ -2213,11 +2242,13 @@ function game_apply_projectile_impact(state, p) {
     // Goliath Colossal ability: skips weapon, strikes tower directly
     if (p.skips_weapon && has_active_wep) {
         target_tower.hp = max(0, target_tower.hp - atk_dmg);
-        game_log(state, alien.name + " bypassed the mounted " + twep.name + " (Colossal ability) and struck " + target_tower.name + " directly for " + string(atk_dmg) + " dmg! (HP: " + string(target_tower.hp) + "/10)");
-        game_sfx(state, "hit");
+        game_log(state, alien.name + " bypassed the mounted " + twep.name + " (Colossal ability) and struck " + target_tower.name + " directly for " + string(atk_dmg) + " dmg! (HP: " + string(target_tower.hp) + "/" + string(target_tower.max_hp) + ")");
+        game_sfx(state, "tower_hit");
         if (target_tower.hp <= 0) {
             target_tower.alive = false;
             game_log(state, target_tower.name + " DESTROYED!");
+            game_sfx(state, "tower_down");
+            game_fx(state, { k: "shake", v: 16 });
             if (!is_undefined(target_tower.weapon)) {
                 target_tower.weapon.alive = false;
                 target_tower.weapon = undefined;
@@ -2248,11 +2279,13 @@ function game_apply_projectile_impact(state, p) {
     
     // Tower takes damage directly (no mounted weapon)
     target_tower.hp = max(0, target_tower.hp - atk_dmg);
-    game_log(state, alien.name + " projectile struck " + target_tower.name + " for " + string(atk_dmg) + " dmg! (HP: " + string(target_tower.hp) + "/10)");
-    game_sfx(state, "hit");
+    game_log(state, alien.name + " projectile struck " + target_tower.name + " for " + string(atk_dmg) + " dmg! (HP: " + string(target_tower.hp) + "/" + string(target_tower.max_hp) + ")");
+    game_sfx(state, "tower_hit");
     if (target_tower.hp <= 0) {
         target_tower.alive = false;
         game_log(state, target_tower.name + " DESTROYED!");
+            game_sfx(state, "tower_down");
+            game_fx(state, { k: "shake", v: 16 });
         if (!is_undefined(target_tower.weapon)) {
             target_tower.weapon.alive = false;
             target_tower.weapon = undefined;
@@ -2262,21 +2295,30 @@ function game_apply_projectile_impact(state, p) {
 
 function game_advance_wave_phase(state) {
     game_log(state, "--- REGROUP & WAVE ADVANCE ---");
-    game_sfx(state, "wave");
+    var final_day = game_final_day(state);
     // Flamethrower vulnerability only lasts for the turn it was applied
     for (var v = 0; v < array_length(state.active_zone); v++) state.active_zone[v].vulnerable = false;
-    
+
+    // Everything that reaches the walls today, for the morning warning
+    var arrivals = [];
+    var walls_before = array_length(state.active_zone);
+
     // 1. Hatchers spawn Hatchlings
-    for (var i = 0; i < array_length(state.active_zone); i++) {
-        if (state.active_zone[i].alive && state.active_zone[i].catalog_id == "hatcher") {
-            game_spawn_alien(state, "hatchling", "active");
-            game_spawn_alien(state, "hatchling", "active");
-            game_log(state, "Hatcher spawned two Hatchlings (2 HP, 1 Dmg)!");
+    var n_before = array_length(state.active_zone);
+    for (var i = 0; i < n_before; i++) {
+        var hat = state.active_zone[i];
+        if (hat.alive && hat.catalog_id == "hatcher") {
+            var broods = hat[$ "broods"] ?? 0;
+            var n_hatch = (broods == 0) ? 1 : 2; // its first day at the walls makes 1, every day after makes 2
+            hat.broods = broods + 1;
+            for (var h = 0; h < n_hatch; h++) game_spawn_alien(state, "hatchling", "active");
+            array_push(arrivals, (n_hatch == 1) ? "a Hatchling" : "2 Hatchlings");
+            game_log(state, "Hatcher spawned " + ((n_hatch == 1) ? "a Hatchling" : "two Hatchlings") + " (2 HP, 1 Dmg)!");
         }
     }
-    
-    // 2. Alien Queen summons T1 and T2 alien with +3 HP
-    for (var i = 0; i < array_length(state.active_zone); i++) {
+    // 2. Alien Queen summons a T1 and a T2 alien with +3 HP
+    n_before = array_length(state.active_zone);
+    for (var i = 0; i < n_before; i++) {
         if (state.active_zone[i].alive && state.active_zone[i].catalog_id == "alien_queen") {
             var t1 = game_get_alien_tier_pool(1);
             var t2 = game_get_alien_tier_pool(2);
@@ -2284,135 +2326,230 @@ function game_advance_wave_phase(state) {
             var a2 = game_spawn_alien(state, t2[irandom(array_length(t2) - 1)], "active");
             a1.hp += 3; a1.max_hp += 3;
             a2.hp += 3; a2.max_hp += 3;
+            array_push(arrivals, a1.name);
+            array_push(arrivals, a2.name);
             game_log(state, "Alien Queen summoned elite reinforcements (+3 HP)!");
         }
     }
-    
-    // 3. Move all spawn_zone aliens into active_zone
-    while (array_length(state.spawn_zone) > 0) {
-        var al = array_pop(state.spawn_zone);
+    // 3. Incoming wave reaches the walls (keep arrival order)
+    for (var i = 0; i < array_length(state.spawn_zone); i++) {
+        var al = state.spawn_zone[i];
         array_push(state.active_zone, al);
-        game_log(state, "INCOMING WAVE: " + al.name + " entered the active combat zone!");
+        array_push(arrivals, al.name);
+        game_log(state, "INCOMING WAVE: " + al.name + " reached the walls!");
     }
-    
-    // 4. Resource Drone: gathers 1 random Forest or Cave 1 card
+    state.spawn_zone = [];
+
+    // 4. Resource Drone: one resource card each from the Forest, Cave 1 and Cave 2 every morning
     for (var i = 0; i < array_length(state.weapons); i++) {
         if (state.weapons[i].alive && state.weapons[i].catalog_id == "resource_drone") {
-            var d_key = (irandom(1) == 0) ? "forest" : "cave_1";
-            if (array_length(state.decks[$ d_key]) == 0) state.decks[$ d_key] = game_create_deck(d_key);
-            var d_deck = state.decks[$ d_key];
-            if (array_length(d_deck) > 0) {
-                var d_card = array_pop(d_deck);
-                if (d_card.type == "resource") {
-                    state.storage[$ d_card.resource] += d_card.amount;
-                    game_log(state, "Resource Drone retrieved " + d_card.name + "!");
+            var d_keys = ["forest", "cave_1", "cave_2"];
+            var d_got = [];
+            for (var dk = 0; dk < 3; dk++) {
+                var d_key = d_keys[dk];
+                for (var tries = 0; tries < 6; tries++) {
+                    if (array_length(state.decks[$ d_key]) == 0) state.decks[$ d_key] = game_create_deck(d_key);
+                    var d_card = array_pop(state.decks[$ d_key]);
+                    if (d_card.type == "resource") {
+                        state.storage[$ d_card.resource] += d_card.amount;
+                        array_push(d_got, d_card.name);
+                        break;
+                    }
                 }
+            }
+            if (array_length(d_got) > 0) {
+                var d_txt = d_got[0];
+                for (var dg = 1; dg < array_length(d_got); dg++) d_txt += ", " + d_got[dg];
+                game_log(state, "Resource Drone brought back: " + d_txt + "!");
             }
         }
     }
-    
-    // 5. Energy Pylon: check bonus
-    var energy_bonus = 0;
-    for (var i = 0; i < array_length(state.weapons); i++) {
-        if (state.weapons[i].alive && state.weapons[i].catalog_id == "energy_pylon") {
-            energy_bonus++;
-        }
-    }
-    
-    // 6. Advance Round / Day
+
+    // 5. Advance the day
     state.round_number++;
-    
-    // Weapon manual powering cooldown progression
+    state.pylon_rotation = (state[$ "pylon_rotation"] ?? 0) + 1;
+
+    // Weapon manual powering cooldowns
     for (var t = 0; t < 4; t++) {
         var tow = state.towers[t];
         if (tow.manual_powers_this_turn > 0) {
             tow.manual_cooldown = tow.manual_powers_this_turn;
             tow.manual_powers_this_turn = 0;
-            var cd_str = (tow.manual_cooldown == 1) ? "1 turn" : (string(tow.manual_cooldown) + " turns");
-            game_log(state, tow.name + "'s mounted weapon entered cooldown for " + cd_str + " (powered " + string(tow.manual_cooldown) + " times).");
+            game_log(state, tow.name + "'s mounted weapon entered cooldown for " + string(tow.manual_cooldown) + " day(s).");
         } else if (tow.manual_cooldown > 0) {
             tow.manual_cooldown -= 1;
-            if (tow.manual_cooldown == 0) {
-                game_log(state, tow.name + "'s mounted weapon cooled down and is ready to be powered!");
-            }
+            if (tow.manual_cooldown == 0) game_log(state, tow.name + "'s mounted weapon cooled down and is ready to be powered!");
         }
     }
-    
-    // Shop reroll cost decay: resets to 3 after 3 days of not rerolling
-    if (!state.rerolled_this_day) {
-        state.days_without_reroll++;
-        if (state.days_without_reroll >= 3) {
-            if (state.shop_reroll_cost > 3) {
-                state.shop_reroll_cost = 3;
-                game_log(state, "Shop reroll cost returned to 3 Gold after 3 days without rerolling.");
-            }
-        }
-    } else {
-        state.days_without_reroll = 0;
-    }
+
+    state.shop_reroll_cost = 5;
     state.rerolled_this_day = false;
-    
-    // Victory Check (after Wave 17 without endless)
-    // The game does NOT end on the final wave until all aliens are dead!
-    if (state.round_number > 17 && !state.endless_mode) {
+
+    // Victory: the campaign does not end until every alien from the final wave is dead
+    var final_stand = false;
+    if (state.round_number > final_day && !state.endless_mode) {
         if (array_length(state.active_zone) == 0 && array_length(state.spawn_zone) == 0) {
             state.phase = "victory";
             state.modal = { type: "victory" };
             game_log(state, "VICTORY ACHIEVED! All aliens eliminated on the Final Wave!");
             game_sfx(state, "victory");
             return;
-        } else {
-            // Hostiles still remain from Wave 17! Keep players on Wave 17 until eradicated
-            state.round_number = 17;
-            game_log(state, "FINAL WAVE STAND: Alien threats still remain! Eliminate all aliens to claim victory!");
-            
-            // Refill players energy to battle the remaining aliens
-            for (var i = 0; i < state.num_players; i++) {
-                var p = state.players[i];
-                p.max_energy = game_calculate_player_max_energy(p.character, state.num_players, energy_bonus);
-                p.energy = max(1, p.max_energy - p.energy_penalty);
-                p.energy_penalty = 0;
-                p.ended_turn = false;
-            }
-            
-            state.active_town_favor = irandom(array_length(state.town_favors) - 1);
-            var new_fav = state.town_favors[state.active_town_favor];
-            game_log(state, "A new day begins! Town Favor is now " + new_fav.name + " (" + new_fav.desc + ")!");
-            
-            state.current_player_idx = 0;
-            state.phase = "player_actions";
-            game_log(state, "Round 17 Final Stand continued! Prepare your defenses.");
-            game_popup(state, "FINAL STAND", "Hostiles remain - wipe them out to win!", make_color_rgb(255, 84, 84), 200);
-            return;
         }
+        state.round_number = final_day;
+        final_stand = true;
+        game_log(state, "FINAL STAND: Alien threats still remain! Eliminate all aliens to claim victory!");
+    } else {
+        game_spawn_wave_for_round(state, state.round_number);
     }
-    
-    // 7. Spawn new wave into spawn_zone
-    game_spawn_wave_for_round(state, state.round_number);
-    
-    // 8. Refill players energy (scaled by team size + Energy Pylon bonus)
+
+    // Refill energy (team size scaling + Energy Pylons)
+    var pylons = game_count_alive_weapons(state, "energy_pylon");
     for (var i = 0; i < state.num_players; i++) {
         var p = state.players[i];
-        p.max_energy = game_calculate_player_max_energy(p.character, state.num_players, energy_bonus);
+        p.max_energy = game_calculate_player_max_energy(p.character, state.num_players, game_pylon_bonus(state, i, pylons));
         p.energy = max(1, p.max_energy - p.energy_penalty);
         p.energy_penalty = 0;
-        p.ended_turn = false;
+        p.ended_turn = (p[$ "disconnected"] ?? false);
+        if (p.ended_turn) p.energy = 0;
     }
-    
-    // Pick random Town Favor every day after the alien wave
+    if (pylons > 0) game_log(state, "Energy Pylon" + (pylons > 1 ? "s" : "") + " charged the squad: " + game_pylon_summary(state, pylons) + ".");
+
     state.active_town_favor = irandom(array_length(state.town_favors) - 1);
     var new_fav = state.town_favors[state.active_town_favor];
     game_log(state, "A new day begins! Town Favor is now " + new_fav.name + " (" + new_fav.desc + ")!");
-    
-    // Reset turns
     state.current_player_idx = 0;
     state.phase = "player_actions";
     game_log(state, "Round " + string(state.round_number) + " begun! Team ready.");
-    var inc = array_length(state.spawn_zone);
+
+    // Morning briefing banner: warn loudly about anything that just reached the walls
     var act = array_length(state.active_zone);
-    var sub = (act > 0) ? (string(act) + " hostile" + (act == 1 ? "" : "s") + " at the walls") : "The perimeter is quiet";
-    if (inc > 0) sub += "  -  " + string(inc) + " more inbound";
-    game_popup(state, "DAY " + string(state.round_number) + " / 17", sub, (act > 0) ? make_color_rgb(255, 160, 64) : make_color_rgb(0, 210, 255), 200);
+    var inc = array_length(state.spawn_zone);
+    var title = final_stand ? "FINAL STAND" : ("DAY " + string(state.round_number) + " / " + string(final_day));
+    var msg, col;
+    var n_arr = max(0, array_length(state.active_zone) - walls_before);
+    if (array_length(arrivals) > 0 && n_arr == 0) n_arr = array_length(arrivals);
+    if (n_arr > 0) {
+        msg = "WARNING: " + string(n_arr) + " new hostile" + ((n_arr == 1) ? " has" : "s have") + " reached the walls" + ((act > n_arr) ? (" (" + string(act) + " in total)") : "") + ". They attack at the end of the day!";
+        col = make_color_rgb(255, 120, 64);
+        title += "  //  HOSTILES AT THE WALLS";
+        game_sfx(state, "alien_arrive", 0.9);
+        game_sfx(state, "wave", 0.8);
+    } else if (act > 0) {
+        msg = string(act) + " hostile" + (act == 1 ? " is" : "s are") + " still at the walls - they attack at the end of the day.";
+        col = make_color_rgb(255, 160, 64);
+    } else {
+        msg = "The perimeter is quiet.";
+        col = make_color_rgb(0, 210, 255);
+    }
+    if (n_arr == 0) game_sfx(state, "day", 0.8);
+    if (inc > 0) msg += "  Radar: " + string(inc) + " more inbound.";
+    game_popup(state, title, msg, col, (n_arr > 0) ? 260 : 200);
+}
+
+/// @desc Last day of the campaign (number of scripted waves)
+function game_final_day(state) {
+    return array_length(state.waves);
+}
+
+function game_count_alive_weapons(state, cid) {
+    var n = 0;
+    for (var i = 0; i < array_length(state.weapons); i++) if (state.weapons[i].alive && state.weapons[i].catalog_id == cid) n++;
+    return n;
+}
+
+/// @desc Energy Pylon bonus for one operative.
+/// Solo: +5. Duo: +2 each. Trio: +1 each, and one operative (rotating daily) gets +2. Squad of 4: +1 each.
+/// Multiple pylons stack.
+function game_pylon_bonus(state, p_idx, pylons) {
+    if (pylons <= 0) return 0;
+    switch (state.num_players) {
+        case 1: return 5 * pylons;
+        case 2: return 2 * pylons;
+        case 3: return pylons * ((p_idx == ((state[$ "pylon_rotation"] ?? 0) mod 3)) ? 2 : 1);
+        default: return pylons;
+    }
+}
+
+function game_pylon_summary(state, pylons) {
+    var parts = [];
+    for (var i = 0; i < state.num_players; i++) array_push(parts, state.players[i].name + " +" + string(game_pylon_bonus(state, i, pylons)));
+    var s = "";
+    for (var i = 0; i < array_length(parts); i++) s += (i > 0 ? ", " : "") + parts[i];
+    return s;
+}
+
+// =============================================================================
+// TOWER REBUILD / REINFORCE (Workshop)
+// =============================================================================
+function game_tower_rebuild_cost() { return { gold: 50, power_gem: 4, metal: 10 }; }
+function game_tower_reinforce_cost() { return { gold: 45, power_gem: 3, metal: 10 }; }
+
+function game_storage_has(state, cost) {
+    var keys = variable_struct_get_names(cost);
+    for (var i = 0; i < array_length(keys); i++) if (state.storage[$ keys[i]] < cost[$ keys[i]]) return false;
+    return true;
+}
+
+function game_storage_pay(state, cost) {
+    var keys = variable_struct_get_names(cost);
+    for (var i = 0; i < array_length(keys); i++) state.storage[$ keys[i]] -= cost[$ keys[i]];
+}
+
+function game_cost_string(cost) {
+    var order = ["gold", "metal", "power_gem", "stone", "scrap", "wood", "crystals"];
+    var names = { gold: "Gold", metal: "Metal", power_gem: "Power Gems", stone: "Stone", scrap: "Scrap", wood: "Wood", crystals: "Crystals" };
+    var s = "";
+    for (var i = 0; i < array_length(order); i++) {
+        if (variable_struct_exists(cost, order[i])) s += (s == "" ? "" : ", ") + string(cost[$ order[i]]) + " " + names[$ order[i]];
+    }
+    return s;
+}
+
+function game_player_rebuild_tower(state, player, t) {
+    var cost_e = game_task_cost(player);
+    if (t < 0 || t > 3) return false;
+    var tow = state.towers[t];
+    if (player.node != "workstation") { game_log(state, "Towers can only be rebuilt from the Workstation."); return false; }
+    if (tow.alive) { game_log(state, tow.name + " is still standing."); return false; }
+    if (tow[$ "rebuilt"] ?? false) { game_log(state, tow.name + " has already been rebuilt once - it can't be rebuilt again."); return false; }
+    if (player.energy < cost_e) { game_log(state, "Need " + string(cost_e) + " Energy to rebuild a tower!"); return false; }
+    var cost = game_tower_rebuild_cost();
+    if (!game_storage_has(state, cost)) { game_log(state, "Rebuilding needs " + game_cost_string(cost) + " in storage."); return false; }
+    game_storage_pay(state, cost);
+    player.energy -= cost_e;
+    tow.alive = true;
+    tow.hp = tow.max_hp;
+    tow.rebuilt = true;
+    tow.weapon = undefined;
+    tow.manual_cooldown = 0;
+    tow.manual_powers_this_turn = 0;
+    game_log(state, player.name + " rebuilt " + tow.name + " from the ruins! (" + string(tow.max_hp) + " HP)");
+    game_sfx(state, "forge");
+    var tn = state.nodes[$ tow.node_id];
+    game_trigger_player_action(state, player, "forge", "REBUILT " + string_upper(tow.name), make_color_rgb(100, 230, 255));
+    game_spawn_board_action_effect(state, tn.x, tn.y, "repair", make_color_rgb(100, 230, 255));
+    game_check_player_energy_depleted(state, player);
+    return true;
+}
+
+function game_player_reinforce_tower(state, player, t) {
+    var cost_e = game_task_cost(player);
+    if (t < 0 || t > 3) return false;
+    var tow = state.towers[t];
+    if (player.node != "workstation") { game_log(state, "Towers can only be reinforced from the Workstation."); return false; }
+    if (!tow.alive) { game_log(state, tow.name + " is destroyed - rebuild it first."); return false; }
+    if (player.energy < cost_e) { game_log(state, "Need " + string(cost_e) + " Energy to reinforce a tower!"); return false; }
+    var cost = game_tower_reinforce_cost();
+    if (!game_storage_has(state, cost)) { game_log(state, "Reinforcing needs " + game_cost_string(cost) + " in storage."); return false; }
+    game_storage_pay(state, cost);
+    player.energy -= cost_e;
+    tow.max_hp += 5;
+    tow.hp += 5;
+    game_log(state, player.name + " reinforced " + tow.name + ": max integrity is now " + string(tow.max_hp) + "!");
+    game_sfx(state, "forge");
+    game_trigger_player_action(state, player, "repair", "+5 MAX HP (" + tow.name + ")", make_color_rgb(64, 160, 255));
+    game_check_player_energy_depleted(state, player);
+    return true;
 }
 
 function game_end_current_player_turn(state) {
@@ -2512,6 +2649,7 @@ function game_popup(state, title, msg, color, timer = 180) {
 
 /// @desc Applies a visual/audio effect locally and, when hosting, queues it for every client
 function game_fx(state, fx) {
+    if (sim_active()) return;
     game_fx_apply(state, fx);
     if (state.is_online && state.is_host && state.screen == "game") {
         array_push(state.net_fx_queue, fx);
@@ -2548,6 +2686,15 @@ function game_fx_apply(state, fx) {
         case "thit":
             if (fx.t >= 0 && fx.t < 4) state.tower_hit_flash[fx.t] = 1.0;
             break;
+        case "death":
+            var lp = state.lane_pos[$ string(fx.uid)];
+            array_push(state.dying_aliens, { uid: fx.uid, cat: fx.cat, tier: fx.tier, x: fx.x, y: fx.y, name: fx[$ "name"] ?? "", mh: fx[$ "mh"] ?? 0,
+                lx: is_undefined(lp) ? -1000 : lp[0], ly: is_undefined(lp) ? -1000 : lp[1], life: DEATH_HOLD_FRAMES + DEATH_OUT_FRAMES, max_life: DEATH_HOLD_FRAMES + DEATH_OUT_FRAMES });
+            game_spawn_combat_impact_effect(state, fx.x, fx.y, "alien", "death");
+            break;
+        case "arc":
+            array_push(state.combat_arcs, { x1: fx.x1, y1: fx.y1, x2: fx.x2, y2: fx.y2, c: fx.c, s: fx.s, life: 34, max_life: 34, seed: irandom(9999) });
+            break;
     }
 }
 
@@ -2571,6 +2718,11 @@ function game_combat_alien_anchor(state, idx) {
 // =============================================================================
 function game_combat_update(state) {
     var spd_mult = state.combat_speed_2x ? 2.0 : 1.0;
+    var vol = state[$ "volley"];
+    if (!is_undefined(vol) && (state[$ "volley_end_timer"] ?? 0) > 0) {
+        state.volley_end_timer -= state.combat_speed_2x ? 2 : 1;
+        if (state.volley_end_timer <= 0) { game_volley_end(state); return; }
+    }
 
     // 1. Player projectiles in flight
     for (var p = array_length(state.combat_player_projectiles) - 1; p >= 0; p--) {
@@ -2590,6 +2742,21 @@ function game_combat_update(state) {
         game_sfx(state, "hit", 0.8);
         if (tgt_idx >= 0) game_apply_weapon_damage(state, pp.weapon, tgt_idx);
         array_delete(state.combat_player_projectiles, p, 1);
+
+        if (!is_undefined(vol)) {
+            // Day-time volley: no retaliation - close the screen once every shot has landed
+            var v_done = true;
+            for (var i = 0; i < 4; i++) if (!state.tower_weapon_used[i]) v_done = false;
+            if (array_length(state.active_zone) == 0 || (v_done && array_length(state.combat_player_projectiles) == 0)) {
+                if (array_length(state.active_zone) == 0) game_log(state, "Every alien at the walls is down!");
+                state.tower_weapon_used = [true, true, true, true];
+                state.tower_weapon_shots = [0, 0, 0, 0];
+                state.combat_selected_tower = -1;
+                state.volley_end_timer = 55;
+            }
+            if (state.is_online) state.net_dirty = true;
+            continue;
+        }
 
         if (array_length(state.active_zone) == 0) {
             game_log(state, "All active aliens eliminated! Base is secured.");
@@ -2620,7 +2787,9 @@ function game_combat_update(state) {
             }
         }
         if (array_length(state.combat_projectiles) == 0) {
-            if (state.alien_attack_delay > 0) {
+            if (state.turn_popup_timer > 0) {
+                // Hold fire until the phase banner has cleared the screen
+            } else if (state.alien_attack_delay > 0) {
                 state.alien_attack_delay = max(0, state.alien_attack_delay - (state.combat_speed_2x ? 2 : 1));
             } else if (state.phase != "game_over") {
                 var launched = game_spawn_next_alien_projectile(state);
@@ -2651,7 +2820,7 @@ function game_combat_visual_update(state) {
 
 /// @desc Closes a concluded combat: victory check, otherwise the next day begins
 function game_combat_conclude(state) {
-    if (state.round_number >= 17 && !state.endless_mode && array_length(state.active_zone) == 0 && array_length(state.spawn_zone) == 0) {
+    if (state.round_number >= game_final_day(state) && !state.endless_mode && array_length(state.active_zone) == 0 && array_length(state.spawn_zone) == 0) {
         state.phase = "victory";
         state.modal = { type: "victory" };
         game_sfx(state, "victory");
@@ -2685,7 +2854,7 @@ function game_execute_action(state, p_idx, action, args) {
     var log_before = state.log_counter;
     var ok = false;
 
-    var board_actions = ["move", "gather", "craft_metal", "deposit", "dismantle", "buy", "reroll", "craft_bp", "repair_tower", "repair_weapon", "trade", "manual_fire", "end_turn", "begin_defense"];
+    var board_actions = ["move", "gather", "craft_metal", "deposit", "dismantle", "buy", "reroll", "craft_bp", "repair_tower", "repair_weapon", "trade", "sell_cart", "manual_fire", "volley_start", "end_turn", "begin_defense", "rebuild_tower", "reinforce_tower"];
     if (array_contains(board_actions, action)) {
         if (!board_phase) return false;
         if (state.is_online && (pl.ended_turn || (pl[$ "disconnected"] ?? false))) {
@@ -2723,10 +2892,16 @@ function game_execute_action(state, p_idx, action, args) {
         case "repair_tower":  ok = game_player_repair_tower(state, pl, clamp(real(args[$ "tower"] ?? 0), 0, 3), string(args[$ "method"] ?? "")); break;
         case "repair_weapon": ok = game_player_repair_weapon_at_tower(state, pl, real(args[$ "tower"] ?? -1)); break;
         case "trade":         ok = game_player_town_trade(state, pl, string(args[$ "res"] ?? ""), real(args[$ "count"] ?? 1)); break;
+        case "rebuild_tower": ok = game_player_rebuild_tower(state, pl, real(args[$ "tower"] ?? -1)); break;
+        case "sell_cart":     ok = game_player_sell_cart(state, pl, args[$ "cart"]); break;
+        case "reinforce_tower": ok = game_player_reinforce_tower(state, pl, real(args[$ "tower"] ?? -1)); break;
+        case "volley_start":
+            ok = game_player_start_volley(state, pl);
+            break;
         case "manual_fire":
-            var mt = real(args[$ "target"] ?? 0);
-            if (mt >= 0 && mt < array_length(state.active_zone)) ok = game_player_manual_fire(state, pl, mt);
-            else game_log(state, "No target selected.");
+            var picks = args[$ "targets"];
+            if (!is_array(picks)) picks = real(args[$ "target"] ?? -1);
+            ok = game_player_manual_fire(state, pl, picks);
             break;
         case "end_turn":
         case "begin_defense":
@@ -2764,7 +2939,11 @@ function game_execute_action(state, p_idx, action, args) {
             break;
         case "combat_skip":
             if (state.phase == "combat_weapons" && state.combat_subphase == "player_weapons" && array_length(state.combat_player_projectiles) == 0) {
-                game_start_alien_attack_phase(state);
+                if (!is_undefined(state[$ "volley"])) {
+                    var vt = state.volley.tower;
+                    // Standing down before the first shot refunds the Energy
+                    game_volley_end(state, !state.tower_weapon_used[vt] && state.tower_weapon_shots[vt] == state.tower_weapon_max_shots[vt]);
+                } else game_start_alien_attack_phase(state);
                 ok = true;
             }
             break;
@@ -2864,4 +3043,152 @@ function game_node_in_direction(state, from_key, dx, dy) {
         if (diff < best_diff) { best_diff = diff; best = nb; }
     }
     return best;
+}
+
+
+/// @desc Starting team gold by squad size: solo 0, duo 5, trio 10, squad of four 15
+function game_starting_gold(n) {
+    return max(0, (clamp(n, 1, 4) - 1) * 5);
+}
+
+/// @desc Sells a mixed basket in one go. Every 3 items (any mix) is one trade costing the operative's task energy.
+function game_player_sell_cart(state, player, cart) {
+    if (player.node != "town") { game_log(state, "Travel to Town to sell."); return false; }
+    if (!is_struct(cart)) { game_log(state, "Nothing picked to sell."); return false; }
+    var keys = ["wood", "scrap", "stone", "metal", "crystals", "power_gem"];
+    var defs = game_get_resource_definitions();
+    var fav = state.town_favors[state.active_town_favor];
+    var units = 0, gold = 0, parts = "";
+    for (var i = 0; i < 6; i++) {
+        var k = keys[i];
+        var n = floor(real(cart[$ k] ?? 0));
+        if (n <= 0) continue;
+        if (state.storage[$ k] < n) { game_log(state, "Only " + string(state.storage[$ k]) + " " + defs[$ k].name + " in storage."); return false; }
+        units += n;
+        gold += n * (defs[$ k].sell_value + ((fav.resource == k) ? fav.bonus_gold : 0));
+        parts += ((parts == "") ? "" : ", ") + string(n) + " " + defs[$ k].name;
+    }
+    if (units == 0) { game_log(state, "Nothing picked to sell."); return false; }
+    var trades = ceil(units / 3);
+    var cost = trades * game_task_cost(player);
+    if (player.energy < cost) {
+        game_log(state, "Selling " + string(units) + " items takes " + string(trades) + " trades (" + string(cost) + " energy) - you have " + string(player.energy) + ".");
+        return false;
+    }
+    for (var i = 0; i < 6; i++) {
+        var n2 = floor(real(cart[$ keys[i]] ?? 0));
+        if (n2 > 0) state.storage[$ keys[i]] -= n2;
+    }
+    state.storage.gold += gold;
+    player.energy -= cost;
+    game_log(state, player.name + " sold " + parts + " for " + string(gold) + " Gold (" + string(trades) + " trade" + ((trades == 1) ? "" : "s") + ", " + string(cost) + " Energy).");
+    game_sfx(state, "sell");
+    game_trigger_player_action(state, player, "trade", "+" + string(gold) + " GOLD", make_color_rgb(255, 215, 0));
+    game_check_player_energy_depleted(state, player);
+    return true;
+}
+
+/// @desc Overcharge Pylon bonus a tower's weapon gets (same order as the night's defense: each Pylon buffs 2 guns, left to right)
+function game_overcharge_bonus(state, tower_idx) {
+    var pylon_count = 0;
+    for (var i = 0; i < array_length(state.weapons); i++) {
+        if (state.weapons[i].alive && state.weapons[i].catalog_id == "overcharge_pylon") pylon_count += 2;
+    }
+    var buffed = 0;
+    for (var t = 0; t < 4; t++) {
+        var tw = state.towers[t];
+        if (!tw.alive || is_undefined(tw.weapon)) continue;
+        var w = tw.weapon;
+        if (w.alive && w.damage > 0 && !w.disabled && buffed < pylon_count) {
+            buffed++;
+            if (t == tower_idx) return 3;
+        }
+    }
+    return 0;
+}
+
+/// @desc Manual fire during the day: opens the tactical attack screen for the tower weapon the operative stands on.
+/// Shots are aimed and resolved exactly like the night's defense, so every ability (Tesla shock, Cryo freeze,
+/// Flamethrower burn, Railgun pierce, Mortar splash, Lazer calibration) applies, and the status effects stay on the
+/// aliens into the night's attack.
+function game_player_start_volley(state, player) {
+    var ti = game_player_tower_idx(player);
+    if (ti < 0) {
+        game_log(state, "Move onto Tower 1, 2, 3, or 4 to fire its mounted weapon!");
+        return false;
+    }
+    var tower = state.towers[ti];
+    if (is_undefined(tower.weapon) || !tower.weapon.alive || tower.weapon.hp <= 0) {
+        game_log(state, tower.name + " has no mounted defense weapon!");
+        return false;
+    }
+    var w = tower.weapon;
+    if (w.damage <= 0) {
+        game_log(state, w.name + " is a support structure and cannot directly fire!");
+        return false;
+    }
+    if (tower.manual_cooldown > 0) {
+        game_log(state, tower.name + "'s " + w.name + " is cooling down (" + string(tower.manual_cooldown) + " day(s) remaining)!");
+        return false;
+    }
+    var cost = game_fire_cost(state, player);
+    if (player.energy < cost) {
+        game_log(state, "Need " + string(cost) + " Energy to fire " + w.name + "!");
+        return false;
+    }
+    for (var i = array_length(state.active_zone) - 1; i >= 0; i--) if (!state.active_zone[i].alive) array_delete(state.active_zone, i, 1);
+    if (array_length(state.active_zone) == 0) {
+        game_log(state, "No aliens at the walls to attack!");
+        return false;
+    }
+
+    player.energy -= cost;
+    tower.manual_powers_this_turn += 1;
+    w.bonus_damage = game_overcharge_bonus(state, ti);
+    var shots = game_weapon_shots(w);
+
+    state.volley = { tower: ti, player: player.id, cost: cost };
+    state.phase = "combat_weapons";
+    state.combat_subphase = "player_weapons";
+    state.modal = { type: "tactical_combat" };
+    state.combat_projectiles = [];
+    state.combat_player_projectiles = [];
+    state.combat_concluded_reason = "";
+    state.combat_conclude_btn_hover = false;
+    state.tower_weapon_shots = [0, 0, 0, 0];
+    state.tower_weapon_max_shots = [0, 0, 0, 0];
+    state.tower_weapon_used = [true, true, true, true];
+    state.tower_weapon_shots[ti] = shots;
+    state.tower_weapon_max_shots[ti] = shots;
+    state.tower_weapon_used[ti] = false;
+    state.combat_selected_tower = ti;
+
+    game_log(state, player.name + " powered " + w.name + " at " + tower.name + " (" + string(cost) + " Energy" + ((w.bonus_damage > 0) ? ", overcharged +3" : "") + ") - " + string(tower.manual_powers_this_turn) + "-day cooldown next round.");
+    game_sfx(state, "click");
+    game_trigger_player_action(state, player, "fire", "WEAPON POWERED!", make_color_rgb(255, 170, 0));
+    return true;
+}
+
+/// @desc Closes the day-time attack screen and returns the squad to planning. Status effects stay on the aliens.
+function game_volley_end(state, refund = false) {
+    var v = state[$ "volley"];
+    if (is_undefined(v)) return;
+    var pl = state.players[clamp(v.player, 0, state.num_players - 1)];
+    if (refund) {
+        pl.energy += v.cost;
+        state.towers[v.tower].manual_powers_this_turn = max(0, state.towers[v.tower].manual_powers_this_turn - 1);
+        game_log(state, pl.name + " stood down the " + state.towers[v.tower].weapon.name + " (Energy refunded).");
+    }
+    state.volley = undefined;
+    state.phase = "player_actions";
+    state.combat_subphase = "player_weapons";
+    state.combat_selected_tower = -1;
+    state.combat_player_projectiles = [];
+    state.combat_projectiles = [];
+    state.tower_weapon_shots = [0, 0, 0, 0];
+    state.tower_weapon_used = [true, true, true, true];
+    if (!is_undefined(state.modal) && state.modal.type == "tactical_combat") state.modal = undefined;
+    for (var i = array_length(state.active_zone) - 1; i >= 0; i--) if (!state.active_zone[i].alive) array_delete(state.active_zone, i, 1);
+    if (state.is_online) state.net_dirty = true;
+    if (!refund) game_check_player_energy_depleted(state, pl);
 }

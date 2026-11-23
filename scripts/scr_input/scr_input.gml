@@ -39,6 +39,16 @@ function input_step(state) {
 // TIMERS, PARTICLES, ANIMATION
 // =============================================================================
 function input_tick_effects(state) {
+    // Soft whoosh when a window opens or closes (combat / end screens have their own sounds)
+    var mt = is_undefined(state.modal) ? "" : state.modal.type;
+    var prev_mt = state[$ "sfx_prev_modal"] ?? "";
+    if (mt != prev_mt) {
+        var quiet = ["", "tactical_combat", "game_over", "victory"];
+        if (prev_mt == "" && !array_contains(quiet, mt)) game_play_sfx("modal_open", 0.8);
+        else if (mt == "" && !array_contains(quiet, prev_mt)) game_play_sfx("modal_close", 0.7);
+        state.sfx_prev_modal = mt;
+    }
+
     if (state.toast_timer > 0) state.toast_timer--;
     if (state.turn_popup_timer > 0) state.turn_popup_timer--;
     state.name_cursor_timer++;
@@ -89,6 +99,15 @@ function input_tick_effects(state) {
         ft.alpha = clamp(ft.life / (ft.max_life * 0.4), 0, 1);
         if (ft.life <= 0) array_delete(state.floating_texts, f, 1);
     }
+    for (var d = array_length(state.dying_aliens) - 1; d >= 0; d--) {
+        state.dying_aliens[d].life--;
+        if (state.dying_aliens[d].life <= 0) array_delete(state.dying_aliens, d, 1);
+    }
+    for (var r = array_length(state.combat_arcs) - 1; r >= 0; r--) {
+        state.combat_arcs[r].life--;
+        if (state.combat_arcs[r].life <= 0) array_delete(state.combat_arcs, r, 1);
+    }
+    if (state.combat_speed_2x && state.turn_popup_timer > 0 && (state.phase == "combat_weapons" || state.phase == "combat_aliens")) state.turn_popup_timer--;
     for (var c = array_length(state.combat_texts) - 1; c >= 0; c--) {
         var ct = state.combat_texts[c];
         ct.life--; ct.y += ct.vy; ct.vy *= 0.93;
@@ -157,6 +176,7 @@ function input_text_field(max_chars, allowed = "") {
 // =============================================================================
 function input_close_modal(state) {
     var m = state.modal;
+    state.market_cart = {};
     game_play_sfx("click");
     if (!is_undefined(m) && (m[$ "from_pause"] ?? false) && state.screen == "game") state.modal = { type: "pause" };
     else state.modal = undefined;
@@ -211,26 +231,24 @@ function input_modal(state, mx, my, clicked) {
 
         case "shop":
             if (esc || keyboard_check_pressed(ord("S"))) { input_close_modal(state); return; }
-            if (clicked && state.shop_reroll_hover) { game_do(state, "reroll", {}); return; }
-            if (clicked && state.shop_buy_hover >= 0) { game_do(state, "buy", { slot: state.shop_buy_hover }); return; }
+            if (clicked && !is_undefined(state.ui_click_action)) input_run_ui_action(state, state.ui_click_action);
             return;
 
         case "town":
             if (esc || keyboard_check_pressed(ord("T"))) { input_close_modal(state); return; }
-            if (clicked && state.town_sell_hover >= 0) {
-                var trade_keys = ["wood", "scrap", "stone", "metal", "crystals", "power_gem"];
-                game_do(state, "trade", { res: trade_keys[state.town_sell_hover], count: max(1, state.town_sell_count) });
-            }
+            if (keyboard_check_pressed(vk_enter)) { input_run_ui_action(state, { a: "@sell_cart", args: {} }); return; }
+            if (clicked && !is_undefined(state.ui_click_action)) input_run_ui_action(state, state.ui_click_action);
             return;
 
         case "repair":
         case "workstation":
             if (esc || keyboard_check_pressed(ord("R"))) { input_close_modal(state); return; }
-            var ws_mx0 = (1920 - 1180) * 0.5;
-            var ws_my0 = (1080 - 650) * 0.5;
-            if (point_in_rectangle(mx, my, ws_mx0 + 30, ws_my0 + 112, ws_mx0 + 580, ws_my0 + 600)) {
-                if (mouse_wheel_up()) state.workstation_bp_scroll_y = max(0, state.workstation_bp_scroll_y - 48);
-                if (mouse_wheel_down()) state.workstation_bp_scroll_y = min(state.workstation_bp_max_scroll, state.workstation_bp_scroll_y + 48);
+            var ws_mx0 = (1920 - 1240) * 0.5;
+            var ws_my0 = (1080 - 780) * 0.5;
+            var WL = ui_workshop_layout(ws_mx0, ws_my0, 1240, 780);
+            if (point_in_rectangle(mx, my, WL.lx, WL.ly, WL.lx + WL.lw, WL.ly + WL.lh)) {
+                if (mouse_wheel_up()) state.workstation_bp_scroll_y = max(0, state.workstation_bp_scroll_y - 90);
+                if (mouse_wheel_down()) state.workstation_bp_scroll_y = min(state.workstation_bp_max_scroll, state.workstation_bp_scroll_y + 90);
             }
             if (clicked && state.workstation_bp_thumb_hover) {
                 state.workstation_bp_drag = true;
@@ -242,18 +260,10 @@ function input_modal(state, mx, my, clicked) {
                 if (mouse_check_button(mb_left)) {
                     state.workstation_bp_scroll_y = clamp(state.workstation_bp_drag_start_val + ((my - state.workstation_bp_drag_start_my) / max(1, state.workstation_bp_usable_track)) * state.workstation_bp_max_scroll, 0, state.workstation_bp_max_scroll);
                 } else state.workstation_bp_drag = false;
+                return;
             }
-            if (clicked) {
-                if (state.workstation_craft_bp_idx >= 0 && state.workstation_craft_target_tower >= 0) {
-                    game_do(state, "craft_bp", { bp: state.workstation_craft_bp_idx, tower: state.workstation_craft_target_tower });
-                } else if (state.repair_tower_1_hover >= 0) {
-                    game_do(state, "repair_tower", { tower: state.repair_tower_1_hover, method: "stone_wood" });
-                } else if (state.repair_tower_3_hover >= 0) {
-                    game_do(state, "repair_tower", { tower: state.repair_tower_3_hover, method: "metal_or_scrap_stone" });
-                } else if (state.repair_weapon_hover >= 0) {
-                    game_do(state, "repair_weapon", { tower: state.repair_weapon_hover });
-                }
-            }
+            if (keyboard_check_pressed(ord("C"))) { game_do(state, "craft_metal", {}); return; }
+            if (clicked && !is_undefined(state.ui_click_action)) input_run_ui_action(state, state.ui_click_action);
             return;
 
         case "tactical_combat":
@@ -338,9 +348,10 @@ function input_settings(state, mx, my, clicked, esc) {
     if (state.settings_mode_borderless_hover) { state.settings.display_mode = "borderless"; game_apply_display_settings("borderless", r[0], r[1]); game_play_sfx("click"); return; }
     if (state.settings_mode_fullscreen_hover) { state.settings.display_mode = "fullscreen"; game_apply_display_settings("fullscreen", r[0], r[1]); game_play_sfx("click"); return; }
     if (state.settings_mode_windowed_hover) { state.settings.display_mode = "windowed"; game_apply_display_settings("windowed", r[0], r[1]); game_play_sfx("click"); return; }
-    if (state.settings_res_hover >= 0) {
-        state.settings.resolution_idx = state.settings_res_hover;
-        var rr = state.resolutions[state.settings_res_hover];
+    var rdir = (state[$ "settings_res_prev_hover"] ?? false) ? -1 : ((state[$ "settings_res_next_hover"] ?? false) ? 1 : 0);
+    if (rdir != 0) {
+        state.settings.resolution_idx = clamp(state.settings.resolution_idx + rdir, 0, array_length(state.resolutions) - 1);
+        var rr = state.resolutions[state.settings.resolution_idx];
         if (state.settings.display_mode == "windowed") game_apply_display_settings("windowed", rr[0], rr[1]);
         game_play_sfx("click");
         return;
@@ -567,7 +578,7 @@ function input_launch_local(state) {
     game_apply_setup_roster(state);
     state.modal = undefined;
     ui_transition_to(state, "game");
-    game_popup(state, "DAY 1 / 17", "Gather resources and fortify the base. The first aliens arrive on Day 3.", C_ACCENT, 220);
+    game_popup(state, "DAY 1 / " + string(game_final_day(state)), "Gather resources and fortify the base. The first aliens show up on radar on Day 3.", C_ACCENT, 220);
     game_play_sfx("wave");
 }
 
@@ -686,23 +697,15 @@ function input_game(state, mx, my, clicked) {
 
     if (!clicked) return;
 
-    // ---- Action bar ----
-    if (state.btn_gather_hover) { game_do(state, "gather", {}); return; }
-    if (state.btn_dismantle_hover) { game_do(state, "dismantle", {}); return; }
-    if (state.btn_craft_hover) { game_do(state, "craft_metal", {}); return; }
-    if (state.btn_shop_hover) { game_play_sfx("click"); state.modal = { type: "shop" }; return; }
-    if (state.btn_repair_hover) { game_play_sfx("click"); state.modal = { type: "repair" }; return; }
-    if (state.btn_town_hover) { game_play_sfx("click"); state.modal = { type: "town" }; return; }
-    if (state.btn_fire_hover) { input_quick_fire(state, pl); return; }
-    if (state.btn_endturn_hover) { game_do(state, "end_turn", {}); return; }
-    if (state.btn_combat_hover) { game_do(state, "begin_defense", {}); return; }
+    // ---- Action bar (contextual buttons register their action while drawing) ----
+    if (!is_undefined(state.ui_click_action)) { input_run_ui_action(state, state.ui_click_action); return; }
 
     // ---- Alien cards: fire if piloting an armed tower, otherwise inspect ----
     if (state.active_alien_hover >= 0) {
         var ti = game_player_tower_idx(pl);
         var tw = (ti >= 0) ? state.towers[ti] : undefined;
         var can_pilot = !standing_by && !is_undefined(tw) && !is_undefined(tw.weapon) && tw.weapon.alive && tw.weapon.damage > 0 && tw.manual_cooldown <= 0 && pl.energy >= game_fire_cost(state, pl);
-        if (can_pilot) { game_do(state, "manual_fire", { target: state.active_alien_hover }); return; }
+        if (can_pilot) { input_quick_fire(state, pl); return; } // opens the attack screen
     }
     if (!is_undefined(state.alien_inspect_hover)) {
         state.modal = { type: "alien_inspect", alien: state.alien_inspect_hover };
@@ -749,22 +752,45 @@ function input_interact(state, pl, node_key) {
         case "shop": state.modal = { type: "shop" }; game_play_sfx("click"); break;
         case "workstation": state.modal = { type: "repair" }; game_play_sfx("click"); break;
         case "main_base":
-            var carried = 0;
-            var keys = variable_struct_get_names(pl.backpack);
-            for (var i = 0; i < array_length(keys); i++) carried += pl.backpack[$ keys[i]];
-            if (carried > 0) game_do(state, "deposit", {}); else game_do(state, "craft_metal", {});
+            game_do(state, "deposit", {});
             break;
         case "tower": input_quick_fire(state, pl); break;
         default: game_play_sfx("error", 0.5);
     }
 }
 
-/// @desc Fires the tower weapon the operative is standing on at the first legal target
+/// @desc Fire key / button / alien click on an armed tower: opens the attack screen for that weapon
 function input_quick_fire(state, pl) {
-    if (array_length(state.active_zone) == 0) { game_do(state, "manual_fire", { target: -1 }); return; }
-    var tgt = 0;
-    for (var a = 0; a < array_length(state.active_zone); a++) {
-        if (state.active_zone[a].catalog_id == "scout") { tgt = a; break; }
+    game_do(state, "volley_start", {});
+}
+
+/// @desc Runs an action registered by a UI button: "modal:<type>" opens a screen, "@fire" quick-fires, anything else is a game action
+function input_run_ui_action(state, act) {
+    var a = act.a;
+    if (a == "") return;
+    if (string_pos("modal:", a) == 1) {
+        state.modal = { type: string_delete(a, 1, 6) };
+        game_play_sfx("click");
+        return;
     }
-    game_do(state, "manual_fire", { target: tgt });
+    if (a == "@fire") { input_quick_fire(state, game_local_player(state)); return; }
+    if (a == "@cart") {
+        if (!is_struct(state[$ "market_cart"])) state.market_cart = {};
+        var k = act.args.res;
+        var cur = state.market_cart[$ k] ?? 0;
+        state.market_cart[$ k] = clamp(cur + act.args.d, 0, state.storage[$ k]);
+        game_play_sfx((act.args.d > 0) ? "coin" : "click", 0.5);
+        return;
+    }
+    if (a == "@cart_clear") { state.market_cart = {}; game_play_sfx("click"); return; }
+    if (a == "@sell_cart") {
+        var cart = state[$ "market_cart"] ?? {};
+        var total = 0;
+        var keys = variable_struct_get_names(cart);
+        for (var i = 0; i < array_length(keys); i++) total += cart[$ keys[i]];
+        if (total <= 0) return;
+        if (game_do(state, "sell_cart", { cart: cart })) state.market_cart = {};
+        return;
+    }
+    game_do(state, a, act.args);
 }

@@ -148,17 +148,27 @@ function ui_draw_d20(dx, dy, dsize, value, die_color, text_color) {
     draw_text(cx, cy, string(value));
 }
 
+/// @desc Modal layer: fades the backdrop and scales the panel in whenever a different modal opens
 function ui_draw_modals(state, mx, my) {
-    if (is_undefined(state.modal)) return;
-    
-    var m = state.modal;
-
-    // Dimmed backdrop with a soft vignette
-    var fade_in = ui_anim("modal_fade", 1, 0.25);
+    if (is_undefined(state.modal)) { state.modal_anim_key = ""; return; }
+    var key = state.modal.type;
+    if ((state[$ "modal_anim_key"] ?? "") != key) { state.modal_anim_key = key; state.modal_anim_t = 0; }
+    state.modal_anim_t = min(1, (state[$ "modal_anim_t"] ?? 1) + 0.13);
+    var e = 1 - power(1 - state.modal_anim_t, 3);
     draw_set_color(make_color_rgb(2, 4, 8));
-    draw_set_alpha(0.72 * fade_in);
+    draw_set_alpha(0.72 * e);
     draw_rectangle(0, 0, 1920, 1080, false);
     draw_set_alpha(1.0);
+    var base = matrix_get(matrix_world);
+    var sc = 0.93 + 0.07 * e;
+    var mt = matrix_multiply(matrix_multiply(matrix_build(-960, -540, 0, 0, 0, 0, 1, 1, 1), matrix_build(0, 0, 0, 0, 0, 0, sc, sc, 1)), matrix_build(960, 540 + (1 - e) * 24, 0, 0, 0, 0, 1, 1, 1));
+    matrix_set(matrix_world, matrix_multiply(mt, base));
+    ui_draw_modal_body(state, mx, my);
+    matrix_set(matrix_world, base);
+}
+
+function ui_draw_modal_body(state, mx, my) {
+    var m = state.modal;
 
     if (m.type == "pause") { ui_draw_pause_menu(state, mx, my); state.modal_close_hover = false; return; }
     if (m.type == "help") { ui_draw_help(state, mx, my); state.modal_close_hover = false; return; }
@@ -170,9 +180,12 @@ function ui_draw_modals(state, mx, my) {
     if (m.type == "player_setup") {
         mw = 1060;
         mh = 570;
-    } else if (m.type == "shop" || m.type == "repair" || m.type == "workstation" || m.type == "town") {
-        mw = 1180;
-        mh = 650;
+    } else if (m.type == "shop" || m.type == "town") {
+        mw = 1240;
+        mh = 720;
+    } else if (m.type == "repair" || m.type == "workstation") {
+        mw = 1240;
+        mh = 780;
     } else if (m.type == "tactical_combat") {
         mw = 1720;
         mh = 940;
@@ -257,7 +270,7 @@ function ui_draw_modals(state, mx, my) {
         else if (al.catalog_id == "saboteur") tip_text = "Death Retaliation: Deals 2 damage back to whichever weapon deals the killing blow.";
         else if (al.catalog_id == "goliath") tip_text = "Siege Juggernaut: Direct damage cannot be tanked by defense weapons; strikes tower directly!";
         else if (al.catalog_id == "emp_weaver") tip_text = "Electromagnetic Pulse: Completely disables the base's highest damage weapon each wave!";
-        else if (al.catalog_id == "hatcher") tip_text = "Brood Mother: Spawns two new Hatchlings (2 HP, 1 Dmg) into the active zone each wave.";
+        else if (al.catalog_id == "hatcher") tip_text = "Brood Mother: Spawns 1 Hatchling (2 HP, 1 Dmg) after its first day at the walls, then 2 every day it survives after that.";
         else if (al.catalog_id == "alien_queen") tip_text = "Apex Swarm Matriarch: Summons Tier 1 and Tier 2 alien reinforcements with +3 HP each wave!";
         else if (al.catalog_id == "apex_predator") tip_text = "Colossal Health Pool: Max 10 damage taken from any single attack. Requires sustained team fire.";
         
@@ -288,14 +301,19 @@ function ui_draw_modals(state, mx, my) {
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(make_color_rgb(255, 215, 0));
         draw_set_font(fnt_h3);
-        draw_text(mx0 + 32, head_y + 17, "TACTICAL DEFENSE  //  DAY " + string(state.round_number));
+        var vol_ui = state[$ "volley"];
+        draw_text(mx0 + 32, head_y + 17, is_undefined(vol_ui) ? ("TACTICAL DEFENSE  //  DAY " + string(state.round_number))
+                                                             : ("WEAPON VOLLEY  //  " + string_upper(state.towers[vol_ui.tower].name) + "  //  DAY " + string(state.round_number)));
         draw_set_font(fnt_body);
         
         // Dynamic prompt / subphase instruction
         var prompt_str = "";
         var prompt_col = c_white;
         if (state.combat_subphase == "player_weapons") {
-            if (state.combat_selected_tower >= 0 && !state.tower_weapon_used[state.combat_selected_tower]) {
+            if (!is_undefined(vol_ui) && state.tower_weapon_used[vol_ui.tower]) {
+                prompt_str = "VOLLEY COMPLETE: Shocked, Frozen and Burning effects stay on the aliens into tonight's attack.";
+                prompt_col = make_color_rgb(255, 200, 90);
+            } else if (state.combat_selected_tower >= 0 && !state.tower_weapon_used[state.combat_selected_tower]) {
                 var sel_tw = state.towers[state.combat_selected_tower];
                 var sel_w = sel_tw.weapon;
                 var shots_l = state.tower_weapon_shots[state.combat_selected_tower];
@@ -321,7 +339,7 @@ function ui_draw_modals(state, mx, my) {
             }
         }
         draw_set_color(prompt_col);
-        draw_text(mx0 + 32, head_y + 38, prompt_str);
+        draw_text(mx0 + 32, head_y + 38, ui_fit_text(prompt_str, mw - 470));
         
         // Header buttons in top-right
         var spd_w = 150;
@@ -340,9 +358,16 @@ function ui_draw_modals(state, mx, my) {
             var adv_h = 36;
             var adv_x = spd_x - adv_w - 12;
             var adv_y = head_y + 9;
-            state.combat_advance_hover = ui_draw_button(adv_x, adv_y, adv_w, adv_h, "End Volley", array_length(state.combat_player_projectiles) == 0, false, mx, my, "danger", "Space");
+            var adv_lbl = "End Volley";
+            var adv_tip = "End weapons attack phase immediately and proceed to alien retaliation.";
+            if (!is_undefined(vol_ui)) {
+                var v_unfired = !state.tower_weapon_used[vol_ui.tower] && state.tower_weapon_shots[vol_ui.tower] == state.tower_weapon_max_shots[vol_ui.tower];
+                adv_lbl = v_unfired ? "Stand Down" : "Back to Base";
+                adv_tip = v_unfired ? "Close the attack screen without firing (Energy refunded)." : "Return to the base. Any remaining shots are lost.";
+            }
+            state.combat_advance_hover = ui_draw_button(adv_x, adv_y, adv_w, adv_h, adv_lbl, array_length(state.combat_player_projectiles) == 0, false, mx, my, is_undefined(vol_ui) ? "danger" : "default", "Space");
             if (state.combat_advance_hover) {
-                state.hover_tooltip = "End weapons attack phase immediately and proceed to alien retaliation.";
+                state.hover_tooltip = adv_tip;
             }
         } else if (state.combat_subphase == "combat_concluded") {
             var conc_w = 260;
@@ -368,6 +393,8 @@ function ui_draw_modals(state, mx, my) {
         // 2. TOP SECTION: ACTIVE INVASION ZONE (ALIENS)
         // -------------------------------------------------------------
         var num_act = array_length(state.active_zone);
+        var combat_order = ui_alien_display_order(state, "order_combat");
+        var num_disp = array_length(combat_order);
         var act_zone_y = head_y + 64;
         
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
@@ -378,35 +405,44 @@ function ui_draw_modals(state, mx, my) {
         var card_w = 186;
         var card_h = 220;
         var card_gap = 14;
-        if (num_act > 0) {
-            if (num_act * (card_w + card_gap) - card_gap > max_act_w) {
-                card_gap = clamp(floor((max_act_w - num_act * 130) / max(1, num_act - 1)), 6, 12);
-                card_w = clamp(floor((max_act_w - (num_act - 1) * card_gap) / num_act), 120, 186);
+        if (num_disp > 0) {
+            if (num_disp * (card_w + card_gap) - card_gap > max_act_w) {
+                card_gap = clamp(floor((max_act_w - num_disp * 130) / max(1, num_disp - 1)), 6, 12);
+                card_w = clamp(floor((max_act_w - (num_disp - 1) * card_gap) / num_disp), 120, 186);
             }
         }
-        var cards_total_w = (num_act > 0) ? (num_act * (card_w + card_gap) - card_gap) : 0;
+        var cards_total_w = (num_disp > 0) ? (num_disp * (card_w + card_gap) - card_gap) : 0;
         var card_start_x = mx0 + (mw - cards_total_w) * 0.5;
         var card_y = act_zone_y + 24;
         
         state.combat_alien_coords = [];
         var has_scout_alive = game_has_active_scout(state);
         
-        if (num_act == 0) {
+        if (num_disp == 0) {
             ui_box(mx0 + 30, card_y, mx0 + mw - 30, card_y + 80, make_color_rgb(18, 24, 34), make_color_rgb(46, 60, 80), 8);
             draw_set_halign(fa_center); draw_set_valign(fa_middle);
             draw_set_color(make_color_rgb(120, 230, 150));
             draw_text(mx0 + mw * 0.5, card_y + 40, "★ ALL ACTIVE THREATS NEUTRALIZED -- SECTOR PERIMETER CLEAR ★");
         } else {
-            for (var a = 0; a < num_act; a++) {
+            var c_idx_of = {};
+            for (var a = 0; a < num_act; a++) c_idx_of[$ string(state.active_zone[a].uid)] = a;
+            for (var oi = 0; oi < num_disp; oi++) {
+                var uid_c = string(combat_order[oi]);
+                var ac_x = ui_anim("cax" + uid_c, card_start_x + oi * (card_w + card_gap), 0.16);
+                if (!variable_struct_exists(c_idx_of, uid_c)) {
+                    ui_draw_dead_card(ac_x, card_y, card_w, card_h, ui_find_dying(state, combat_order[oi]));
+                    continue;
+                }
+                var a = c_idx_of[$ uid_c];
                 var al = state.active_zone[a];
-                var ac_x = card_start_x + a * (card_w + card_gap);
                 state.combat_alien_coords[a] = [ac_x + card_w * 0.5, card_y + card_h];
                 
                 var is_al_hov = ui_point_in_rect(mx, my, ac_x, card_y, card_w, card_h);
                 if (is_al_hov) state.combat_alien_hover = a;
-                
+
                 var is_scout = (al.catalog_id == "scout");
                 var is_target_locked = (has_scout_alive && !is_scout);
+                if (is_al_hov) state.hover_tooltip = ui_combat_alien_tip(state, al, is_target_locked);
                 
                 ui_draw_combat_alien_card(state, ac_x, card_y, card_w, card_h, al, a, is_al_hov, is_target_locked, is_scout);
             }
@@ -463,10 +499,15 @@ function ui_draw_modals(state, mx, my) {
                 var trail_py = lerp(start_y, target_y, max(0, pp.progress - 0.16));
                 
                 var pp_col = make_color_rgb(0, 229, 255); // bright cyan
-                if (pp.catalog_id == "sniper") pp_col = make_color_rgb(255, 235, 59);
-                else if (pp.catalog_id == "plasma") pp_col = make_color_rgb(180, 50, 255);
-                else if (pp.catalog_id == "flamethrower" || pp.catalog_id == "minigun") pp_col = make_color_rgb(255, 110, 30);
-                else if (pp.catalog_id == "cryo") pp_col = make_color_rgb(120, 240, 255);
+                switch (pp.catalog_id) {
+                    case "railgun": pp_col = make_color_rgb(200, 245, 255); break;
+                    case "plasma_mortar": pp_col = make_color_rgb(190, 70, 255); break;
+                    case "flamethrower": pp_col = make_color_rgb(255, 110, 30); break;
+                    case "gatling_gun": pp_col = make_color_rgb(255, 205, 70); break;
+                    case "cryo_emitter": pp_col = make_color_rgb(150, 235, 255); break;
+                    case "lazer_gun": pp_col = make_color_rgb(255, 70, 90); break;
+                    case "cannon": case "makeshift_cannon": pp_col = make_color_rgb(255, 160, 80); break;
+                }
                 
                 draw_set_color(pp_col);
                 draw_set_alpha(0.6);
@@ -633,6 +674,8 @@ function ui_draw_modals(state, mx, my) {
                 state.hover_tooltip = "Discharge the Tesla coil: damages and weakens every active alien.";
             }
         }
+        // Splash / pierce arcs
+        ui_draw_combat_arcs(state);
         // Floating damage numbers
         if (is_array(state.combat_texts)) {
             draw_set_halign(fa_center); draw_set_valign(fa_middle);
@@ -649,821 +692,13 @@ function ui_draw_modals(state, mx, my) {
         }
     }
     else if (m.type == "shop") {
-        // -------------------------------------------------------------
-        // HEADER: TITLE & CORE HUD BADGES
-        // -------------------------------------------------------------
-        draw_set_halign(fa_center); draw_set_valign(fa_top);
-        draw_set_color(C_AMBER);
-        ui_modal_title(mx0 + mw * 0.5, my0 + 10, "BLUEPRINT SHOP", C_AMBER);
-        
-        var cur_p = state.players[state.current_player_idx];
-        var is_at_shop = (cur_p.node == "shop");
-        var is_scout = (variable_struct_exists(cur_p, "character") && cur_p.character.id == "scout");
-        var task_cost = is_scout ? 2 : 1;
-        var cost_note = is_scout ? "Costs 2 Energy to buy (Scout)" : "Costs 1 Energy to buy";
-        
-        // Operative Status Badge (Top-Left)
-        var st_w = 360;
-        var st_h = 28;
-        var st_x = mx0 + 30;
-        var st_y = my0 + 44;
-        
-        ui_box(st_x, st_y, st_x + st_w, st_y + st_h, is_at_shop ? make_color_rgb(16, 38, 24) : make_color_rgb(38, 30, 14), is_at_shop ? make_color_rgb(46, 204, 113) : make_color_rgb(243, 156, 18), 6);
-        
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(is_at_shop ? make_color_rgb(140, 240, 170) : make_color_rgb(255, 200, 80));
-        var st_msg = is_at_shop ? ("[AT SHOP] " + cur_p.name + " (" + string(task_cost) + "E to buy)") : "[REMOTE VIEW] Station at Shop to buy";
-        draw_text(st_x + 12, st_y + st_h * 0.5, st_msg);
-        
-        // Team Treasury Badge (Top-Middle)
-        var gold_w = 200;
-        var gold_h = 28;
-        var gold_x = st_x + st_w + 20;
-        var gold_y = my0 + 44;
-        
-        ui_box(gold_x, gold_y, gold_x + gold_w, gold_y + gold_h, make_color_rgb(36, 30, 14), make_color_rgb(255, 215, 0), 6);
-        
-        // Small gold coin icon
-        draw_set_color(make_color_rgb(255, 215, 0));
-        draw_circle(gold_x + 16, gold_y + gold_h * 0.5, 9, false);
-        draw_set_color(make_color_rgb(20, 20, 20));
-        draw_circle(gold_x + 16, gold_y + gold_h * 0.5, 9, true);
-        draw_set_halign(fa_center); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(20, 20, 20));
-        draw_text(gold_x + 16, gold_y + gold_h * 0.5, "G");
-        
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(255, 235, 59));
-        draw_text(gold_x + 32, gold_y + gold_h * 0.5, "Team Gold: " + string(state.storage.gold) + "g");
-        
-        // Reroll Catalog Button (Top-Right)
-        var can_reroll = (is_at_shop && state.storage.gold >= state.shop_reroll_cost);
-        var r_btn_w = 320;
-        var r_btn_x = mx0 + mw - 30 - r_btn_w;
-        var r_btn_lbl = is_at_shop ? ("Reroll (" + string(state.shop_reroll_cost) + "g) [+" + string(state.days_without_reroll) + "/3d]") : ("Reroll (" + string(state.shop_reroll_cost) + "g - At Shop)");
-        state.shop_reroll_hover = ui_draw_button(r_btn_x, my0 + 42, r_btn_w, 32, r_btn_lbl, can_reroll, false, mx, my);
-        if (state.shop_reroll_hover) {
-            state.hover_tooltip = "Rerolls catalog items. Next cost: " + string(state.shop_reroll_cost) + "g (+2g/use). Free every 3 days.";
-        }
-        
-        // Subtitle note with deck counter
-        var deck_count = variable_struct_exists(state, "shop_deck") ? array_length(state.shop_deck) : 0;
-        draw_set_halign(fa_center); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(140, 165, 195));
-        draw_text(mx0 + mw * 0.5, my0 + 82, "Purchase blueprints with Gold. Each purchase instantly draws the next blueprint from the deck (" + string(deck_count) + " in deck).");
-        
-        // -------------------------------------------------------------
-        // 3 WEAPON BLUEPRINT CARDS
-        // -------------------------------------------------------------
-        var card_w = 356;
-        var card_h = 510;
-        var card_gap = 26;
-        var start_x = mx0 + 30;
-        var start_y = my0 + 104;
-        state.shop_buy_hover = -1;
-        
-        var res_defs = game_get_resource_definitions();
-        
-        for (var i = 0; i < array_length(state.shop_available_items); i++) {
-            var item = state.shop_available_items[i];
-            if (is_undefined(item)) continue;
-            
-            // If item is index rather than struct, resolve from catalog
-            if (is_real(item)) item = state.shop_catalog[item];
-            
-            var wx = start_x + i * (card_w + card_gap);
-            var wy = start_y;
-            var card_hov = ui_point_in_rect(mx, my, wx, wy, card_w, card_h);
-            
-            // Outer Card Plate
-            ui_box(wx, wy, wx + card_w, wy + card_h, card_hov ? make_color_rgb(32, 40, 56) : make_color_rgb(22, 28, 40), make_color_rgb(255, 215, 0), 10);
-            
-            // 1. Weapon Name
-            draw_set_halign(fa_center); draw_set_valign(fa_top);
-            draw_set_color(C_AMBER);
-            draw_text(wx + card_w * 0.5, wy + 14, item.name);
-            
-            // 2. Stats Badge Plate (HP, Dmg, Targets)
-            var st_py = wy + 40;
-            var st_ph = 30;
-            ui_box(wx + 12, st_py, wx + card_w - 12, st_py + st_ph, make_color_rgb(16, 20, 30), make_color_rgb(46, 60, 80), 6);
-            
-            // Heart icon + HP
-            ui_draw_heart(wx + 26, st_py + st_ph * 0.5, 12, make_color_rgb(231, 76, 60));
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(make_color_rgb(255, 120, 120));
-            draw_text(wx + 44, st_py + st_ph * 0.5, string(item.hp) + " HP");
-            
-            // Damage
-            draw_set_color(make_color_rgb(255, 215, 0));
-            draw_text(wx + 140, st_py + st_ph * 0.5, string(item.damage) + " Dmg");
-            
-            // Targets
-            draw_set_color(c_white);
-            var tgt_str = (item.target_count >= 99) ? "All" : string(item.target_count);
-            draw_text(wx + 245, st_py + st_ph * 0.5, "Targets: " + tgt_str);
-            
-            // 3. Tactical Ability Box
-            var ab_py = wy + 78;
-            var ab_ph = 86;
-            ui_box(wx + 12, ab_py, wx + card_w - 12, ab_py + ab_ph, make_color_rgb(16, 20, 30), make_color_rgb(46, 60, 80), 6);
-            
-            draw_set_halign(fa_left); draw_set_valign(fa_top);
-            draw_set_color(make_color_rgb(100, 210, 255));
-            draw_text(wx + 20, ab_py + 8, "TACTICAL ABILITY:");
-            
-            draw_set_color(make_color_rgb(220, 235, 245));
-            ui_text_ext(wx + 20, ab_py + 26, item.ability, 17, card_w - 40);
-            
-            // 4. Blueprint Specs & Materials Box
-            var sp_py = wy + 172;
-            var sp_ph = 254;
-            ui_box(wx + 12, sp_py, wx + card_w - 12, sp_py + sp_ph, make_color_rgb(16, 20, 30), make_color_rgb(46, 60, 80), 6);
-            
-            // Price Tag
-            draw_set_color(make_color_rgb(255, 215, 0));
-            draw_circle(wx + 28, sp_py + 18, 9, false);
-            draw_set_color(make_color_rgb(20, 20, 20));
-            draw_circle(wx + 28, sp_py + 18, 9, true);
-            draw_set_halign(fa_center); draw_set_valign(fa_middle);
-            draw_text(wx + 28, sp_py + 18, "G");
-            
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(make_color_rgb(255, 220, 70));
-            draw_text(wx + 44, sp_py + 18, "Blueprint Price: " + string(item.cost_gold) + " Gold");
-            
-            // Divider
-            draw_set_color(make_color_rgb(38, 50, 68));
-            draw_line_width(wx + 16, sp_py + 34, wx + card_w - 16, sp_py + 34, 1);
-            
-            // Materials Header
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(make_color_rgb(140, 195, 240));
-            draw_text(wx + 20, sp_py + 48, "Forge Materials (Workstation):");
-            
-            // Materials Rows
-            var rkeys = variable_struct_get_names(item.cost_res);
-            var mat_start_y = sp_py + 72;
-            var has_all_mats = true;
-            
-            for (var k = 0; k < array_length(rkeys); k++) {
-                var rk = rkeys[k];
-                var rdef = res_defs[$ rk];
-                var need = item.cost_res[$ rk];
-                var have = state.storage[$ rk];
-                if (have < need) has_all_mats = false;
-                
-                var my_row = mat_start_y + k * 24;
-                
-                ui_icon_resource(wx + 28, my_row, rk, 18);
-                
-                // Label
-                draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color((have >= need) ? make_color_rgb(120, 230, 150) : make_color_rgb(255, 120, 120));
-                draw_text(wx + 44, my_row, string(need) + " " + rdef.name + " (" + string(have) + " in storage)");
-            }
-            
-            // Unique copy in stock & deck replenishment note
-            var stk_y = sp_py + 196;
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(make_color_rgb(105, 240, 174));
-            draw_text(wx + 20, stk_y, "★ 1 In Stock (Single Blueprint)");
-            
-            draw_set_color(make_color_rgb(130, 150, 175));
-            draw_text(wx + 20, stk_y + 18, "Auto-replenishes from deck");
-            
-            // 5. Buy Blueprint Button
-            var can_buy = (is_at_shop && cur_p.energy >= task_cost && state.storage.gold >= item.cost_gold);
-            var buy_lbl = "Buy Blueprint (" + string(item.cost_gold) + "g)";
-            if (!is_at_shop) buy_lbl = "Visit Shop to Buy";
-            else if (cur_p.energy < task_cost) buy_lbl = "Need " + string(task_cost) + " Energy";
-            else if (state.storage.gold < item.cost_gold) buy_lbl = "Need " + string(item.cost_gold) + " Gold";
-            
-            var btn_y = wy + 442;
-            var btn_w = card_w - 24;
-            var bhov = ui_draw_button(wx + 12, btn_y, btn_w, 48, buy_lbl, can_buy, false, mx, my);
-            if (bhov) {
-                state.shop_buy_hover = i;
-                if (!is_at_shop) state.hover_tooltip = "Must be stationed at the Shop to buy blueprints.";
-                else if (cur_p.energy < task_cost) state.hover_tooltip = "Not enough Energy (Requires " + string(task_cost) + " Energy).";
-                else if (state.storage.gold < item.cost_gold) state.hover_tooltip = "Need " + string(item.cost_gold - state.storage.gold) + " more Gold in Team Storage.";
-                else state.hover_tooltip = "Purchase " + item.name + " Blueprint for " + string(item.cost_gold) + " Gold. (Next deck card will take its place)";
-            }
-        }
+        ui_draw_shop(state, mx, my, mx0, my0, mw, mh);
     }
     else if (m.type == "town") {
-        // -------------------------------------------------------------
-        // HEADER: TITLE & CORE HUD BADGES
-        // -------------------------------------------------------------
-        draw_set_halign(fa_center); draw_set_valign(fa_top);
-        draw_set_color(C_AMBER);
-        ui_modal_title(mx0 + mw * 0.5, my0 + 10, "TOWN MARKET", C_AMBER);
-        
-        var cur_fav = state.town_favors[state.active_town_favor];
-        var cur_p = state.players[state.current_player_idx];
-        var is_at_town = (cur_p.node == "town");
-        var is_scout = (variable_struct_exists(cur_p, "character") && cur_p.character.id == "scout");
-        var task_cost = is_scout ? 2 : 1;
-        var cost_note = is_scout ? "Costs 2 Energy per trade (Scout)" : "Costs 1 Energy per trade";
-        
-        // Operative Status Badge (Top-Left)
-        var st_w = 480;
-        var st_h = 28;
-        var st_x = mx0 + 30;
-        var st_y = my0 + 44;
-        
-        ui_box(st_x, st_y, st_x + st_w, st_y + st_h, is_at_town ? make_color_rgb(16, 38, 24) : make_color_rgb(38, 30, 14), is_at_town ? make_color_rgb(46, 204, 113) : make_color_rgb(243, 156, 18), 6);
-        
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(is_at_town ? make_color_rgb(140, 240, 170) : make_color_rgb(255, 200, 80));
-        var st_msg = is_at_town ? ("[AT TOWN] " + cur_p.name + " Ready to Trade • " + cost_note) : "[REMOTE VIEW] Move operative to Town to trade goods";
-        draw_text(st_x + 12, st_y + st_h * 0.5, st_msg);
-        
-        // Team Treasury Badge (Top-Right)
-        var gold_w = 230;
-        var gold_h = 28;
-        var gold_x = mx0 + mw - 30 - gold_w;
-        var gold_y = my0 + 44;
-        
-        ui_box(gold_x, gold_y, gold_x + gold_w, gold_y + gold_h, make_color_rgb(36, 30, 14), make_color_rgb(255, 215, 0), 6);
-        
-        // Small gold coin icon
-        draw_set_color(make_color_rgb(255, 215, 0));
-        draw_circle(gold_x + 18, gold_y + gold_h * 0.5, 9, false);
-        draw_set_color(make_color_rgb(20, 20, 20));
-        draw_circle(gold_x + 18, gold_y + gold_h * 0.5, 9, true);
-        draw_set_halign(fa_center); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(20, 20, 20));
-        draw_text(gold_x + 18, gold_y + gold_h * 0.5, "G");
-        
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(255, 235, 59));
-        draw_text(gold_x + 34, gold_y + gold_h * 0.5, "Team Gold: " + string(state.storage.gold) + "g");
-        
-        // -------------------------------------------------------------
-        // TODAY'S TOWN FAVOR BANNER
-        // -------------------------------------------------------------
-        var fav_x = mx0 + 30;
-        var fav_y = my0 + 80;
-        var fav_w = mw - 60; // 1120px
-        var fav_h = 54;
-        
-        ui_box(fav_x, fav_y, fav_x + fav_w, fav_y + fav_h, make_color_rgb(32, 26, 18), make_color_rgb(255, 179, 0), 8);
-        
-        // Star badge pill on left
-        var pill_w = 90;
-        var pill_h = 32;
-        var pill_x = fav_x + 12;
-        var pill_y = fav_y + 11;
-        ui_box(pill_x, pill_y, pill_x + pill_w, pill_y + pill_h, make_color_rgb(64, 48, 14), make_color_rgb(255, 215, 0), 6);
-        draw_set_halign(fa_center); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(255, 215, 0));
-        draw_text(pill_x + pill_w * 0.5, pill_y + pill_h * 0.5, "★ FAVOR");
-        
-        // Favor text descriptions
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(255, 225, 110));
-        draw_text(fav_x + 115, fav_y + 18, "TODAY'S TOWN FAVOR: " + string_upper(cur_fav.name) + " (" + cur_fav.desc + ")");
-        
-        draw_set_color(make_color_rgb(205, 195, 175));
-        draw_text(fav_x + 115, fav_y + 38, "Market demand rotates each wave. Sell favored items today for maximum return!");
-        
-        // Right side bonus pill
-        var bon_w = 210;
-        var bon_h = 32;
-        var bon_x = fav_x + fav_w - 14 - bon_w;
-        var bon_y = fav_y + 11;
-        ui_box(bon_x, bon_y, bon_x + bon_w, bon_y + bon_h, make_color_rgb(20, 48, 28), make_color_rgb(46, 204, 113), 6);
-        draw_set_halign(fa_center); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(105, 240, 174));
-        draw_text(bon_x + bon_w * 0.5, bon_y + bon_h * 0.5, "+ " + string(cur_fav.bonus_gold) + "g EXTRA / ITEM");
-        
-        // -------------------------------------------------------------
-        // COLUMN HEADERS
-        // -------------------------------------------------------------
-        var col_y = my0 + 148;
-        draw_set_color(make_color_rgb(130, 155, 185));
-        draw_set_valign(fa_middle);
-        
-        draw_set_halign(fa_left);
-        draw_text(mx0 + 44, col_y, "COMMODITY");
-        draw_text(mx0 + 260, col_y, "TEAM STORAGE");
-        draw_text(mx0 + 450, col_y, "CURRENT VALUE");
-        draw_text(mx0 + 740, col_y, "QUICK TRADE (SELL FROM STORAGE)");
-        
-        // -------------------------------------------------------------
-        // 6 RESOURCE TRADE ROWS
-        // -------------------------------------------------------------
-        var trade_res = ["wood", "scrap", "stone", "metal", "crystals", "power_gem"];
-        var start_ty = my0 + 166;
-        var row_h = 60;
-        var row_gap = 6;
-        var row_w = mw - 60; // 1120px
-        
-        state.town_sell_hover = -1;
-        state.town_sell_count = 0;
-        
-        var res_defs = game_get_resource_definitions();
-        var can_act = (is_at_town && cur_p.energy >= task_cost);
-        
-        for (var t = 0; t < array_length(trade_res); t++) {
-            var rk = trade_res[t];
-            var rdef = res_defs[$ rk];
-            var total_have = state.storage[$ rk];
-            var base_v = rdef.sell_value;
-            var bonus = (cur_fav.resource == rk) ? cur_fav.bonus_gold : 0;
-            var per_item = base_v + bonus;
-            var is_favored = (bonus > 0);
-            
-            var ry = start_ty + t * (row_h + row_gap);
-            var rx = mx0 + 30;
-            var r_mid_y = ry + row_h * 0.5;
-            
-            // Row Container
-            ui_box(rx, ry, rx + row_w, ry + row_h, is_favored ? make_color_rgb(34, 30, 20) : make_color_rgb(22, 28, 40), is_favored ? make_color_rgb(255, 179, 0) : make_color_rgb(46, 60, 80), 8);
-            
-            // 1. Resource Icon Token
-            var ic_x = rx + 26;
-            ui_icon_resource(ic_x, r_mid_y, rk, 28);
-            
-            // 2. Resource Name
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(is_favored ? make_color_rgb(255, 235, 130) : c_white);
-            draw_text(rx + 54, r_mid_y, rdef.name);
-            
-            if (is_favored) {
-                var name_w = string_width(rdef.name);
-                var f_pill_x = rx + 54 + name_w + 12;
-                var f_pill_w = 68;
-                var f_pill_h = 20;
-                ui_box(f_pill_x, r_mid_y - 10, f_pill_x + f_pill_w, r_mid_y + 10, make_color_rgb(58, 44, 14), make_color_rgb(255, 193, 7), 4);
-                
-                draw_set_halign(fa_center); draw_set_valign(fa_middle);
-                draw_set_color(make_color_rgb(255, 225, 80));
-                draw_text(f_pill_x + f_pill_w * 0.5, r_mid_y, "FAVOR");
-            }
-            
-            // 3. Storage Count
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            if (total_have > 0) {
-                draw_set_color(make_color_rgb(100, 215, 255));
-                draw_text(mx0 + 260, r_mid_y, string(total_have) + " in storage");
-            } else {
-                draw_set_color(make_color_rgb(130, 140, 150));
-                draw_text(mx0 + 260, r_mid_y, "0 in storage");
-            }
-            
-            // 4. Unit Market Value
-            if (is_favored) {
-                draw_set_color(make_color_rgb(255, 215, 0));
-                draw_text(mx0 + 450, r_mid_y, string(per_item) + "g each (Base " + string(base_v) + " + " + string(bonus) + "g Favor)");
-            } else {
-                draw_set_color(make_color_rgb(220, 220, 220));
-                draw_text(mx0 + 450, r_mid_y, string(per_item) + "g each");
-            }
-            
-            // 5. Sell Quantity Buttons
-            var btn_y = ry + 12;
-            var btn_h = 36;
-            var btn_w = 115;
-            
-            var b1_x = mx0 + 740;
-            var b2_x = mx0 + 865;
-            var b3_x = mx0 + 990;
-            
-            var b1_can = (can_act && total_have >= 1);
-            var b2_can = (can_act && total_have >= 2);
-            var b3_can = (can_act && total_have >= 3);
-            
-            var bh1 = ui_draw_button(b1_x, btn_y, btn_w, btn_h, "Sell 1 (" + string(per_item * 1) + "g)", b1_can, false, mx, my);
-            if (bh1) { 
-                state.town_sell_hover = t; 
-                state.town_sell_count = 1; 
-                if (!is_at_town) state.hover_tooltip = "Must be stationed at Town to sell resources.";
-                else if (cur_p.energy < task_cost) state.hover_tooltip = "Not enough Energy to trade (Requires " + string(task_cost) + " Energy).";
-                else if (total_have < 1) state.hover_tooltip = "No " + rdef.name + " available in storage.";
-            }
-            
-            var bh2 = ui_draw_button(b2_x, btn_y, btn_w, btn_h, "Sell 2 (" + string(per_item * 2) + "g)", b2_can, false, mx, my);
-            if (bh2) { 
-                state.town_sell_hover = t; 
-                state.town_sell_count = 2; 
-                if (!is_at_town) state.hover_tooltip = "Must be stationed at Town to sell resources.";
-                else if (cur_p.energy < task_cost) state.hover_tooltip = "Not enough Energy to trade (Requires " + string(task_cost) + " Energy).";
-                else if (total_have < 2) state.hover_tooltip = "Need at least 2 " + rdef.name + " in storage.";
-            }
-            
-            var bh3 = ui_draw_button(b3_x, btn_y, btn_w, btn_h, "Sell 3 (" + string(per_item * 3) + "g)", b3_can, false, mx, my);
-            if (bh3) { 
-                state.town_sell_hover = t; 
-                state.town_sell_count = 3; 
-                if (!is_at_town) state.hover_tooltip = "Must be stationed at Town to sell resources.";
-                else if (cur_p.energy < task_cost) state.hover_tooltip = "Not enough Energy to trade (Requires " + string(task_cost) + " Energy).";
-                else if (total_have < 3) state.hover_tooltip = "Need at least 3 " + rdef.name + " in storage.";
-            }
-        }
-        
-        // -------------------------------------------------------------
-        // FOOTER HINT
-        // -------------------------------------------------------------
-        draw_set_halign(fa_center); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(130, 150, 175));
-        draw_text(mx0 + mw * 0.5, my0 + mh - 20, "All proceeds from sales are immediately placed into Base Storage for weapon blueprints & upgrades.");
+        ui_draw_market(state, mx, my, mx0, my0, mw, mh);
     }
     else if (m.type == "repair" || m.type == "workstation") {
-        // -------------------------------------------------------------
-        // HEADER: TITLE & CORE HUD BADGES
-        // -------------------------------------------------------------
-        draw_set_halign(fa_center); draw_set_valign(fa_top);
-        draw_set_color(C_AMBER);
-        ui_modal_title(mx0 + mw * 0.5, my0 + 10, "WORKSHOP  //  FORGE & REPAIR", C_AMBER);
-        
-        var cur_p = state.players[state.current_player_idx];
-        var is_at_workstation = (cur_p.node == "workstation");
-        var is_scout = (variable_struct_exists(cur_p, "character") && cur_p.character.id == "scout");
-        var is_engineer = (variable_struct_exists(cur_p, "character") && cur_p.character.id == "engineer");
-        var task_cost = is_scout ? 2 : 1;
-        var cost_note = is_scout ? "Costs 2 Energy (Scout)" : "Costs 1 Energy";
-        
-        // Operative Status Badge (Top-Left)
-        var st_w = 540;
-        var st_h = 28;
-        var st_x = mx0 + 30;
-        var st_y = my0 + 44;
-        
-        ui_box(st_x, st_y, st_x + st_w, st_y + st_h, is_at_workstation ? make_color_rgb(16, 38, 24) : make_color_rgb(38, 30, 14), is_at_workstation ? make_color_rgb(46, 204, 113) : make_color_rgb(243, 156, 18), 6);
-        
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(is_at_workstation ? make_color_rgb(140, 240, 170) : make_color_rgb(255, 200, 80));
-        var st_msg = is_at_workstation ? ("[AT WORKSTATION] " + cur_p.name + " Ready • " + cost_note) : "[REMOTE VIEW] Move operative to Workstation to forge/repair";
-        draw_text(st_x + 12, st_y + st_h * 0.5, st_msg);
-        
-        // Right Perk / System Pill
-        var pk_w = 560;
-        var pk_h = 28;
-        var pk_x = mx0 + 590;
-        var pk_y = my0 + 44;
-        
-        ui_box(pk_x, pk_y, pk_x + pk_w, pk_y + pk_h, make_color_rgb(20, 28, 40), is_engineer ? make_color_rgb(255, 215, 0) : make_color_rgb(66, 165, 245), 6);
-        
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(is_engineer ? make_color_rgb(255, 235, 110) : make_color_rgb(170, 215, 255));
-        var pk_txt = is_engineer ? "★ Combat Engineer Perk: Base & weapon repairs restore +1 extra HP!" : (is_scout ? "Scout Operative: High map speed / Base tasks cost 2 Energy" : "Base Fortification & Tactical Defense Mount Hub");
-        draw_text(pk_x + 12, pk_y + pk_h * 0.5, pk_txt);
-        
-        state.workstation_craft_bp_idx = -1;
-        state.workstation_craft_target_tower = -1;
-        state.repair_tower_1_hover = -1;
-        state.repair_tower_3_hover = -1;
-        state.repair_weapon_hover = -1;
-        
-        // -------------------------------------------------------------
-        // LEFT COLUMN: OWNED BLUEPRINTS (FORGE & MOUNT DEFENSES)
-        // -------------------------------------------------------------
-        var col1_x = mx0 + 30;
-        var col1_w = 550;
-        var num_bp = array_length(state.blueprints);
-        var view_y = my0 + 112;
-        var view_h = 488;
-        
-        // Section Header Banner
-        ui_box(col1_x, my0 + 78, col1_x + col1_w, my0 + 104, make_color_rgb(20, 28, 40), make_color_rgb(46, 75, 105), 6);
-        
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(100, 210, 255));
-        var bp_header_title = "OWNED BLUEPRINTS (" + string(num_bp) + ") // FORGE DEFENSES";
-        draw_text(col1_x + 12, my0 + 91, bp_header_title);
-        
-        if (num_bp > 3) {
-            draw_set_halign(fa_right); draw_set_valign(fa_middle);
-            draw_set_color(make_color_rgb(140, 165, 195));
-            draw_text(col1_x + col1_w - 12, my0 + 91, "Scrollable [Wheel]");
-        }
-        
-        if (num_bp == 0) {
-            ui_box(col1_x, view_y, col1_x + col1_w, view_y + view_h, make_color_rgb(18, 24, 34), make_color_rgb(45, 60, 80), 8);
-            
-            draw_set_halign(fa_center); draw_set_valign(fa_middle);
-            draw_set_color(make_color_rgb(180, 200, 220));
-            ui_text_ext(col1_x + col1_w * 0.5, view_y + view_h * 0.5, "[No Blueprints Owned]\n\nVisit the Weapon Shop (south of Main Base) to purchase\nweapon blueprints using Gold.\n\nOnce acquired, bring them here to spend raw materials\nand forge them directly onto Towers 1-4!", 22, col1_w - 40);
-        } else {
-            var total_bp_h = num_bp * 160;
-            var max_scroll = max(0, total_bp_h - view_h);
-            state.workstation_bp_max_scroll = max_scroll;
-            state.workstation_bp_scroll_y = clamp(state.workstation_bp_scroll_y, 0, max_scroll);
-            
-            var surf_w = col1_w;
-            var surf_h = view_h;
-            
-            if (!variable_struct_exists(state, "workstation_bp_surf") || is_undefined(state.workstation_bp_surf) || !surface_exists(state.workstation_bp_surf)) {
-                state.workstation_bp_surf = surface_create(surf_w, surf_h);
-            } else if (surface_get_width(state.workstation_bp_surf) != surf_w || surface_get_height(state.workstation_bp_surf) != surf_h) {
-                surface_free(state.workstation_bp_surf);
-                state.workstation_bp_surf = surface_create(surf_w, surf_h);
-            }
-            
-            surface_set_target(state.workstation_bp_surf);
-            draw_clear_alpha(c_black, 0);
-            
-            // Background box for surface
-            ui_box(0, 0, surf_w, surf_h, make_color_rgb(18, 24, 34), make_color_rgb(45, 60, 80), 8);
-            
-            var in_view = (mx >= col1_x && mx <= col1_x + col1_w && my >= view_y && my <= view_y + view_h);
-            var local_mx = in_view ? (mx - col1_x) : -9999;
-            var local_my = in_view ? (my - view_y) : -9999;
-            
-            var card_inner_w = (total_bp_h > view_h) ? (surf_w - 22) : (surf_w - 8);
-            
-            for (var b = 0; b < num_bp; b++) {
-                var bp = state.blueprints[b];
-                var bp_h = 152;
-                var bpy = b * 160 - state.workstation_bp_scroll_y;
-                
-                // Cull invisible cards
-                if (bpy + bp_h < 0 || bpy > surf_h) continue;
-                
-                ui_box(4, bpy, 4 + card_inner_w, bpy + bp_h, make_color_rgb(22, 28, 40), make_color_rgb(52, 73, 94), 8);
-                
-                // Name & Stats
-                draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color(C_AMBER);
-                draw_text(18, bpy + 16, bp.name);
-                
-                // Stats Plate (HP, Dmg, Targets)
-                ui_draw_heart(295, bpy + 16, 11, make_color_rgb(231, 76, 60));
-                draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color(make_color_rgb(255, 120, 120));
-                draw_text(308, bpy + 16, string(bp.hp) + " HP");
-                
-                draw_set_color(make_color_rgb(255, 215, 0));
-                draw_text(385, bpy + 16, string(bp.damage) + " Dmg");
-                
-                draw_set_color(c_white);
-                var tgt_lbl = (bp.target_count >= 99) ? "All" : string(bp.target_count);
-                draw_text(465, bpy + 16, "Tgt: " + tgt_lbl);
-                
-                // Required Resources
-                var rkeys = variable_struct_get_names(bp.cost_res);
-                var req_str = "Needs: ";
-                var has_all_mats = true;
-                for (var k = 0; k < array_length(rkeys); k++) {
-                    var rk = rkeys[k];
-                    var need = bp.cost_res[$ rk];
-                    var have = state.storage[$ rk];
-                    if (have < need) has_all_mats = false;
-                    req_str += string(need) + " " + string_upper(rk) + " (" + string(have) + ")   ";
-                }
-                draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color(has_all_mats ? make_color_rgb(120, 230, 150) : make_color_rgb(255, 120, 120));
-                draw_text(18, bpy + 40, req_str);
-                
-                // Ability
-                draw_set_color(make_color_rgb(180, 205, 230));
-                ui_text_ext(18, bpy + 62, bp.ability, 16, card_inner_w - 24);
-                
-                // Mount Buttons (T1, T2, T3, T4)
-                var can_craft_base = (is_at_workstation && cur_p.energy >= task_cost && has_all_mats);
-                var tw_w = floor((card_inner_w - 24 - 3 * 8) / 4);
-                var tw_gap = 8;
-                var tw_y = bpy + 102;
-                
-                for (var t = 0; t < 4; t++) {
-                    var tw = state.towers[t];
-                    var tw_x = 12 + t * (tw_w + tw_gap);
-                    var tw_can = false;
-                    var tw_lbl = "Mount T" + string(t + 1);
-                    
-                    if (!tw.alive) {
-                        tw_lbl = "T" + string(t + 1) + " Dead";
-                    } else if (!is_undefined(tw.weapon) && tw.weapon.alive && tw.weapon.hp > 0) {
-                        tw_lbl = "T" + string(t + 1) + " Full";
-                    } else {
-                        tw_can = can_craft_base;
-                    }
-                    
-                    var tw_hov = ui_draw_button(tw_x, tw_y, tw_w, 38, tw_lbl, tw_can, false, local_mx, local_my);
-                    if (tw_hov && tw_can) {
-                        state.workstation_craft_bp_idx = b;
-                        state.workstation_craft_target_tower = t;
-                    }
-                    if (tw_hov) {
-                        if (!tw.alive) state.hover_tooltip = "Tower " + string(t + 1) + " is destroyed!";
-                        else if (!is_undefined(tw.weapon) && tw.weapon.alive && tw.weapon.hp > 0) {
-                            state.hover_tooltip = "Tower " + string(t + 1) + " already has " + tw.weapon.name + "! Stand at Tower " + string(t + 1) + " to dismantle it first.";
-                        } else if (!is_at_workstation) {
-                            state.hover_tooltip = "Must be stationed at the Workstation to forge defenses.";
-                        } else if (cur_p.energy < task_cost) {
-                            state.hover_tooltip = "Not enough Energy (Requires " + string(task_cost) + " Energy).";
-                        } else if (!has_all_mats) {
-                            state.hover_tooltip = "Missing required resources in storage to forge " + bp.name + ".";
-                        } else {
-                            state.hover_tooltip = "Forge " + bp.name + " and station it on Tower " + string(t + 1) + ".";
-                        }
-                    }
-                }
-            }
-            
-            surface_reset_target();
-            draw_surface(state.workstation_bp_surf, col1_x, view_y);
-            
-            // Vertical Scrollbar for Blueprints
-            if (total_bp_h > view_h) {
-                var v_track_x = col1_x + col1_w - 14;
-                var v_track_y = view_y + 4;
-                var v_track_w = 8;
-                var v_track_h = view_h - 8;
-                
-                draw_set_color(make_color_rgb(24, 30, 42));
-                draw_roundrect_ext(v_track_x, v_track_y, v_track_x + v_track_w, v_track_y + v_track_h, 4, 4, false);
-                
-                var thumb_h = max(28, (view_h / total_bp_h) * v_track_h);
-                var thumb_y = v_track_y + (state.workstation_bp_scroll_y / max_scroll) * (v_track_h - thumb_h);
-                var thumb_hov = point_in_rectangle(mx, my, v_track_x - 3, thumb_y, v_track_x + v_track_w + 3, thumb_y + thumb_h);
-                state.workstation_bp_thumb_hover = thumb_hov;
-                state.workstation_bp_usable_track = max(1, v_track_h - thumb_h);
-                
-                var thumb_col = ((variable_struct_exists(state, "workstation_bp_drag") && state.workstation_bp_drag) || thumb_hov) ? make_color_rgb(100, 160, 230) : make_color_rgb(60, 80, 110);
-                draw_set_color(thumb_col);
-                draw_roundrect_ext(v_track_x, thumb_y, v_track_x + v_track_w, thumb_y + thumb_h, 4, 4, false);
-            } else {
-                state.workstation_bp_thumb_hover = false;
-                state.workstation_bp_usable_track = 1;
-            }
-        }
-        
-        // -------------------------------------------------------------
-        // RIGHT COLUMN: REPAIR BASE TOWERS & DEFENSES
-        // -------------------------------------------------------------
-        var col2_x = mx0 + 600;
-        var col2_w = 550;
-        
-        // Section Header Banner: Base Towers
-        ui_box(col2_x, my0 + 78, col2_x + col2_w, my0 + 104, make_color_rgb(20, 28, 40), make_color_rgb(46, 75, 105), 6);
-        
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(100, 210, 255));
-        draw_text(col2_x + 12, my0 + 91, "BASE TOWER FORTIFICATIONS // REPAIRS");
-        
-        var ry = my0 + 112;
-        var rep_row_h = 44;
-        var rep_gap = 6;
-        
-        for (var t = 0; t < 4; t++) {
-            var tow = state.towers[t];
-            var r_row_y = ry + t * (rep_row_h + rep_gap);
-            var r_mid = r_row_y + rep_row_h * 0.5;
-            
-            // Tower Row Card
-            ui_box(col2_x, r_row_y, col2_x + col2_w, r_row_y + rep_row_h, make_color_rgb(22, 28, 40), make_color_rgb(46, 60, 80), 6);
-            
-            // Blue Heart Icon
-            ui_draw_heart(col2_x + 18, r_mid, 11, tow.alive ? make_color_rgb(33, 150, 243) : make_color_rgb(90, 90, 90));
-            
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(tow.alive ? c_white : make_color_rgb(220, 80, 80));
-            draw_text(col2_x + 36, r_mid, tow.name + ":");
-            
-            draw_set_color(tow.alive ? (tow.hp < tow.max_hp ? make_color_rgb(255, 205, 100) : make_color_rgb(100, 220, 255)) : make_color_rgb(220, 80, 80));
-            draw_text(col2_x + 104, r_mid, tow.alive ? (string(tow.hp) + "/" + string(tow.max_hp)) : "DEAD");
-            
-            // Repair Buttons with Resource Icons
-            var can_rep1 = (is_at_workstation && tow.alive && tow.hp < tow.max_hp && cur_p.energy >= task_cost && state.storage.stone >= 1 && state.storage.wood >= 1);
-            var can_rep3 = (is_at_workstation && tow.alive && tow.hp < tow.max_hp && cur_p.energy >= task_cost && (state.storage.metal >= 1 || (state.storage.scrap >= 1 && state.storage.stone >= 1)));
-            
-            var b1_x = col2_x + 172;
-            var b1_w = 170;
-            var b1_y = r_mid - 16;
-            var b1_h = 32;
-            var bhov1 = ui_draw_button(b1_x, b1_y, b1_w, b1_h, "", can_rep1, false, mx, my);
-            
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(can_rep1 ? (bhov1 ? C_AMBER : make_color_rgb(120, 240, 150)) : make_color_rgb(140, 140, 140));
-            draw_text(b1_x + 10, r_mid, "+1 HP");
-            draw_set_color(can_rep1 ? c_white : make_color_rgb(140, 140, 140));
-            draw_text(b1_x + 60, r_mid, "1");
-            ui_draw_resource_token(b1_x + 78, r_mid, "stone", 8);
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(can_rep1 ? c_white : make_color_rgb(140, 140, 140));
-            draw_text(b1_x + 94, r_mid, "+ 1");
-            ui_draw_resource_token(b1_x + 128, r_mid, "wood", 8);
-            
-            if (bhov1) {
-                state.repair_tower_1_hover = t;
-                if (!is_at_workstation) state.hover_tooltip = "Must be at Workstation to repair base.";
-                else if (tow.hp >= tow.max_hp) state.hover_tooltip = tow.name + " is already at full health.";
-                else if (state.storage.stone < 1 || state.storage.wood < 1) state.hover_tooltip = "Requires 1 Stone and 1 Wood in Team Storage.";
-                else state.hover_tooltip = "Repair 1 HP on " + tow.name + " (Costs 1 Stone + 1 Wood).";
-            }
-            
-            var b2_x = col2_x + 352;
-            var b2_w = 186;
-            var b2_y = r_mid - 16;
-            var b2_h = 32;
-            var bhov3 = ui_draw_button(b2_x, b2_y, b2_w, b2_h, "", can_rep3, false, mx, my);
-            
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(can_rep3 ? (bhov3 ? C_AMBER : make_color_rgb(100, 220, 255)) : make_color_rgb(140, 140, 140));
-            draw_text(b2_x + 10, r_mid, "+3 HP");
-            draw_set_color(can_rep3 ? c_white : make_color_rgb(140, 140, 140));
-            draw_text(b2_x + 60, r_mid, "1");
-            ui_draw_resource_token(b2_x + 78, r_mid, "metal", 8);
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(can_rep3 ? make_color_rgb(180, 200, 220) : make_color_rgb(140, 140, 140));
-            draw_text(b2_x + 93, r_mid, "/");
-            ui_draw_resource_token(b2_x + 110, r_mid, "scrap", 8);
-            draw_set_halign(fa_left); draw_set_valign(fa_middle);
-            draw_set_color(can_rep3 ? make_color_rgb(180, 200, 220) : make_color_rgb(140, 140, 140));
-            draw_text(b2_x + 125, r_mid, "+");
-            ui_draw_resource_token(b2_x + 144, r_mid, "stone", 8);
-            
-            if (bhov3) {
-                state.repair_tower_3_hover = t;
-                if (!is_at_workstation) state.hover_tooltip = "Must be at Workstation to repair base.";
-                else if (tow.hp >= tow.max_hp) state.hover_tooltip = tow.name + " is already at full health.";
-                else if (state.storage.metal < 1 && (state.storage.scrap < 1 || state.storage.stone < 1)) state.hover_tooltip = "Requires 1 Metal OR (1 Scrap + 1 Stone) in Storage.";
-                else state.hover_tooltip = "Fortify 3 HP on " + tow.name + " (Costs 1 Metal or 1 Scrap+1 Stone).";
-            }
-        }
-        
-        // Mounted Weapons Section Header
-        var wep_sec_y = my0 + 322;
-        ui_box(col2_x, wep_sec_y, col2_x + col2_w, wep_sec_y + 26, make_color_rgb(20, 28, 40), make_color_rgb(46, 75, 105), 6);
-        
-        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(100, 210, 255));
-        draw_text(col2_x + 12, wep_sec_y + 13, "REPAIR MOUNTED DEFENSE WEAPONS");
-        
-        var wy = my0 + 356;
-        var wep_count = 0;
-        for (var t = 0; t < 4; t++) {
-            var tow = state.towers[t];
-            if (!is_undefined(tow.weapon) && tow.weapon.alive) {
-                var wep = tow.weapon;
-                var wy_row = wy + wep_count * 46;
-                var w_mid = wy_row + 20;
-                wep_count++;
-                
-                // Weapon Card
-                ui_box(col2_x, wy_row, col2_x + col2_w, wy_row + 40, make_color_rgb(22, 28, 40), make_color_rgb(46, 60, 80), 6);
-                
-                // Red heart
-                ui_draw_heart(col2_x + 18, w_mid, 11, make_color_rgb(231, 76, 60));
-                
-                draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color(c_white);
-                var w_disp_name = "T" + string(t + 1) + ": " + wep.name;
-                draw_text(col2_x + 36, w_mid, w_disp_name);
-                
-                draw_set_color(wep.hp < wep.max_hp ? make_color_rgb(255, 120, 120) : make_color_rgb(100, 220, 255));
-                draw_text(col2_x + 185, w_mid, string(wep.hp) + "/" + string(wep.max_hp) + " HP");
-                
-                var can_wrep = (is_at_workstation && wep.alive && wep.hp < wep.max_hp && cur_p.energy >= task_cost);
-                var bw_x = col2_x + 280;
-                var bw_w = 258;
-                var bw_y = w_mid - 15;
-                var bw_h = 30;
-                var bhov_w = ui_draw_button(bw_x, bw_y, bw_w, bw_h, "", can_wrep, false, mx, my);
-                
-                draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color(can_wrep ? (bhov_w ? C_AMBER : make_color_rgb(120, 240, 150)) : make_color_rgb(140, 140, 140));
-                draw_text(bw_x + 10, w_mid, "+2 HP (1x:");
-                var rnames = variable_struct_get_names(wep.cost_res);
-                var r_cnt = min(3, array_length(rnames));
-                var rx_start = bw_x + 106;
-                for (var ri = 0; ri < r_cnt; ri++) {
-                    if (ri > 0) {
-                        draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                        draw_set_color(can_wrep ? make_color_rgb(180, 200, 220) : make_color_rgb(140, 140, 140));
-                        draw_text(rx_start + ri * 30 - 10, w_mid, "/");
-                    }
-                    ui_draw_resource_token(rx_start + ri * 30 + 4, w_mid, rnames[ri], 8);
-                }
-                draw_set_halign(fa_left); draw_set_valign(fa_middle);
-                draw_set_color(can_wrep ? make_color_rgb(120, 240, 150) : make_color_rgb(140, 140, 140));
-                draw_text(rx_start + r_cnt * 30 - 4, w_mid, ")");
-                
-                if (bhov_w) {
-                    state.repair_weapon_hover = t;
-                    if (!is_at_workstation) state.hover_tooltip = "Must be at Workstation to repair weapons.";
-                    else if (wep.hp >= wep.max_hp) state.hover_tooltip = wep.name + " is already at full health.";
-                    else state.hover_tooltip = "Repair 2 HP on " + wep.name + " using 1 material from its blueprint recipe.";
-                }
-            }
-        }
-        if (wep_count == 0) {
-            ui_box(col2_x, wy, col2_x + col2_w, wy + 80, make_color_rgb(18, 24, 34), make_color_rgb(45, 60, 80), 6);
-            
-            draw_set_halign(fa_center); draw_set_valign(fa_middle);
-            draw_set_color(make_color_rgb(140, 155, 175));
-            draw_text(col2_x + col2_w * 0.5, wy + 40, "[No weapons currently mounted to towers]\nForge blueprints on the left to install defenses.");
-        }
-        
-        // -------------------------------------------------------------
-        // FOOTER HINT
-        // -------------------------------------------------------------
-        draw_set_halign(fa_center); draw_set_valign(fa_middle);
-        draw_set_color(make_color_rgb(130, 150, 175));
-        draw_text(mx0 + mw * 0.5, my0 + mh - 20, "Base fortifications and defenses can only be repaired while stationed at the Workstation area.");
+        ui_draw_workshop(state, mx, my, mx0, my0, mw, mh);
     }
     else if (m.type == "victory" || state.phase == "victory") {
         ui_draw_end_screen(state, mx, my, mx0, my0, mw, mh, true);
@@ -1789,6 +1024,37 @@ function ui_draw_title_screen(state, mx, my) {
         draw_vertex_color(pcx + lengthdir_x(pr, ang), pcy + lengthdir_y(pr, ang), make_color_rgb(60, 150, 255), 0.35);
     }
     draw_primitive_end();
+    // Outpost silhouette. Drawn before the planet so each building's base is buried below the curved horizon.
+    var blds = [[1336, 54, 56], [1398, 32, 96], [1462, 100, 46], [1534, 22, 78], [1574, 46, 30]];
+    var spire_x = 0, spire_y = 0, mast_x = 0, mast_y = 0;
+    for (var bi = 0; bi < array_length(blds); bi++) {
+        var bx = blds[bi][0], bw = blds[bi][1], bh = blds[bi][2];
+        var y_l = pcy - sqrt(max(0, sqr(pr) - sqr(bx - bw * 0.5 - pcx)));
+        var y_r = pcy - sqrt(max(0, sqr(pr) - sqr(bx + bw * 0.5 - pcx)));
+        var base = max(y_l, y_r) + 2;
+        var top = min(y_l, y_r) - bh;
+        draw_set_color(make_color_rgb(14, 22, 36));
+        draw_rectangle(bx - bw * 0.5, top, bx + bw * 0.5, base + 60, false);
+        draw_set_color(make_color_rgb(30, 48, 74));
+        draw_line(bx - bw * 0.5, top, bx + bw * 0.5, top);
+        if (bi == 1) {
+            draw_set_color(make_color_rgb(14, 22, 36));
+            draw_triangle(bx - bw * 0.5 - 8, top, bx + bw * 0.5 + 8, top, bx, top - 34, false);
+            spire_x = bx; spire_y = top - 36;
+        }
+        if (bi == 3) { mast_x = bx; mast_y = top - 3; }
+        // Lit windows
+        for (var wy = top + 10; wy < base - 12; wy += 14) {
+            for (var wx = bx - bw * 0.5 + 8; wx < bx + bw * 0.5 - 8; wx += 12) {
+                if (((wx * 7 + wy * 13) mod 5) < 2) {
+                    draw_set_color(make_color_rgb(255, 196, 110));
+                    draw_set_alpha(0.55 + 0.25 * sin(t * 0.8 + wx + wy));
+                    draw_rectangle(wx, wy, wx + 4, wy + 5, false);
+                    draw_set_alpha(1);
+                }
+            }
+        }
+    }
     // Planet body as a finely tessellated arc so the horizon stays perfectly smooth
     draw_set_color(make_color_rgb(9, 15, 26));
     draw_primitive_begin(pr_trianglefan);
@@ -1799,19 +1065,12 @@ function ui_draw_title_screen(state, mx, my) {
     for (var ang = 30; ang < 150; ang += 1) {
         draw_line_width(pcx + lengthdir_x(pr, ang), pcy + lengthdir_y(pr, ang), pcx + lengthdir_x(pr, ang + 1), pcy + lengthdir_y(pr, ang + 1), 2);
     }
-    // Outpost silhouette on the horizon with blinking beacons
-    var ox = 1460, oy = pcy - pr + 2;
-    draw_set_color(make_color_rgb(6, 10, 16));
-    draw_rectangle(ox - 120, oy - 40, ox - 70, oy + 20, false);
-    draw_rectangle(ox - 60, oy - 70, ox - 30, oy + 20, false);
-    draw_rectangle(ox - 20, oy - 30, ox + 80, oy + 20, false);
-    draw_triangle(ox - 70, oy - 70, ox - 20, oy - 70, ox - 45, oy - 100, false);
-    draw_rectangle(ox + 90, oy - 55, ox + 110, oy + 20, false);
     var blink = (frac(t * 0.7) < 0.5);
     draw_set_color(blink ? make_color_rgb(255, 80, 80) : make_color_rgb(90, 30, 30));
-    draw_circle(ox - 45, oy - 102, 3, false);
+    draw_circle(spire_x, spire_y, 3, false);
+    if (blink) ui_glow(spire_x, spire_y, 18, make_color_rgb(255, 80, 80), 0.6);
     draw_set_color(make_color_rgb(120, 220, 255));
-    draw_circle(ox + 100, oy - 58, 2, false);
+    draw_circle(mast_x, mast_y, 2, false);
     // Distant swarm silhouettes drifting over the planet
     for (var i = 0; i < 7; i++) {
         var sx = 1920 - ((t * (18 + i * 4) + i * 260) mod 2200) + 140;
@@ -1840,7 +1099,7 @@ function ui_draw_title_screen(state, mx, my) {
     draw_text(lx, ly, "ALIEN GAME");
     draw_set_font(fnt_h2);
     draw_set_color(C_AMBER);
-    draw_text(lx + 6, ly + 74, "HOLD THE OUTPOST FOR 17 DAYS");
+    draw_text(lx + 6, ly + 74, "HOLD THE OUTPOST FOR 20 DAYS");
 
     // Menu
     var items = [
@@ -2039,20 +1298,26 @@ function ui_draw_local_setup_screen(state, mx, my) {
         
         ui_box(name_bx, name_by, name_bx + name_bw, name_by + name_bh, is_editing ? make_color_rgb(38, 52, 74) : (name_hov ? make_color_rgb(30, 42, 60) : make_color_rgb(14, 18, 28)), is_editing ? C_AMBER : (name_hov ? c_white : make_color_rgb(70, 95, 130)), 6);
         
+        var name_cy = name_by + name_bh * 0.5;
+        draw_set_font(fnt_small);
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(make_color_rgb(130, 160, 195));
-        draw_text(name_bx + 12, name_by + 14, "CALLSIGN:");
-        
+        draw_text(name_bx + 14, name_cy, "CALLSIGN");
+        var lab_w = string_width("CALLSIGN");
+
         var disp_name = state.setup_player_names[p];
         if (is_editing && ((state.name_cursor_timer div 25) % 2 == 0)) {
             disp_name += "|";
         }
+        draw_set_font(fnt_h3);
         draw_set_color(is_editing ? C_AMBER : c_white);
-        ui_text_scaled(name_bx + 90, name_by + 26, disp_name, 1.2);
-        
+        draw_text(name_bx + 14 + lab_w + 14, name_cy, disp_name);
+
+        draw_set_font(fnt_small);
         draw_set_halign(fa_right);
         draw_set_color(make_color_rgb(90, 115, 145));
-        draw_text(name_bx + name_bw - 10, name_by + 24, is_editing ? "[Typing...]" : "[Edit]");
+        draw_text(name_bx + name_bw - 12, name_cy, is_editing ? "Typing..." : "Edit");
+        draw_set_font(fnt_body);
         
         // 3. Class Navigation Bar (< Class Name >)
         var cycler_y = name_by + name_bh + 14;

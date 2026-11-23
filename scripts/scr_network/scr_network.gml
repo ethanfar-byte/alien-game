@@ -12,7 +12,7 @@
 
 #macro NET_PORT_TCP 6510
 #macro NET_PORT_UDP 6511
-#macro NET_PROTOCOL 3
+#macro NET_PROTOCOL 4
 #macro NET_MAX_PLAYERS 4
 
 function network_init_manager(state) {
@@ -623,6 +623,7 @@ function network_host_start_mission(state) {
         }
     }
     game_apply_setup_roster(state);
+    state.storage.gold = game_starting_gold(p_count);
     state.net_my_player_idx = 0;
     game_log(state, "Strike team deployed over the local network (" + string(p_count) + " operatives). Good luck!");
 
@@ -670,7 +671,7 @@ function net_snapshot_build(state, include_logs) {
     var towers = [];
     for (var t = 0; t < 4; t++) {
         var tw = state.towers[t];
-        array_push(towers, { hp: tw.hp, max_hp: tw.max_hp, alive: tw.alive, manual_cooldown: tw.manual_cooldown, manual_powers_this_turn: tw.manual_powers_this_turn, w: net_weapon_index(state, tw.weapon) });
+        array_push(towers, { hp: tw.hp, max_hp: tw.max_hp, alive: tw.alive, rebuilt: tw[$ "rebuilt"] ?? false, manual_cooldown: tw.manual_cooldown, manual_powers_this_turn: tw.manual_powers_this_turn, w: net_weapon_index(state, tw.weapon) });
     }
     var pproj = [];
     for (var i = 0; i < array_length(state.combat_player_projectiles); i++) {
@@ -712,6 +713,7 @@ function net_snapshot_build(state, include_logs) {
             max_shots: state.tower_weapon_max_shots,
             used: state.tower_weapon_used,
             selected: state.combat_selected_tower,
+            volley_tower: is_undefined(state[$ "volley"]) ? -1 : state.volley.tower,
             pproj: pproj,
             aproj: aproj
         }
@@ -770,7 +772,7 @@ function net_snapshot_apply(state, snap) {
     for (var t = 0; t < 4; t++) {
         var st = snap.towers[t];
         var tw = state.towers[t];
-        tw.hp = st.hp; tw.max_hp = st.max_hp; tw.alive = st.alive;
+        tw.hp = st.hp; tw.max_hp = st.max_hp; tw.alive = st.alive; tw.rebuilt = st[$ "rebuilt"] ?? false;
         tw.manual_cooldown = st.manual_cooldown; tw.manual_powers_this_turn = st.manual_powers_this_turn;
         tw.weapon = (st.w >= 0 && st.w < array_length(state.weapons)) ? state.weapons[st.w] : undefined;
     }
@@ -837,6 +839,8 @@ function net_snapshot_apply(state, snap) {
     state.tower_weapon_max_shots = cb.max_shots;
     state.tower_weapon_used = cb.used;
     state.combat_selected_tower = cb.selected;
+    var vt_snap = cb[$ "volley_tower"] ?? -1;
+    state.volley = (vt_snap >= 0) ? { tower: vt_snap } : undefined;
     state.combat_player_projectiles = cb.pproj;
     // Rebuild alien projectiles with a lightweight alien stub for rendering
     state.combat_projectiles = [];

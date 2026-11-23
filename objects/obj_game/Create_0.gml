@@ -1,8 +1,9 @@
 /// @desc obj_game Create Event
 var boot_t0 = get_timer();
+randomize(); // without this GameMaker deals the same decks, shop offers and aliens every launch
 autotest_boot();
 game_audio_init();
-autotest_log("audio synth ready in " + string(round((get_timer() - boot_t0) / 1000)) + " ms");
+autotest_log("audio ready in " + string(round((get_timer() - boot_t0) / 1000)) + " ms");
 network_configure();
 
 // Borderless fullscreen by default; the GUI is always laid out at 1920x1080 and scaled

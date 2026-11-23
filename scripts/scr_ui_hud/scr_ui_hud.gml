@@ -34,40 +34,44 @@ function ui_draw_hud_top(state, mx, my) {
     draw_line_width(0, L.top_h, 1920, L.top_h, 2);
     draw_set_alpha(1);
 
-    // Day / wave badge
+    // Day / wave badge: "DAY 12 / 20" + phase chip
     var in_combat = (state.phase == "combat_weapons" || state.phase == "combat_aliens");
     var day_col = in_combat ? C_BAD : C_ACCENT;
-    ui_box(20, 9, 210, 49, C_PANEL, day_col, 8);
+    var final_day = game_final_day(state);
+    var endless_now = state.endless_mode && state.round_number > final_day;
+    ui_box(20, 9, 276, 49, C_PANEL, day_col, 8);
     draw_set_font(fnt_small);
     draw_set_halign(fa_left); draw_set_valign(fa_middle);
     draw_set_color(C_FAINT);
-    draw_text(34, 20, state.endless_mode && state.round_number > 17 ? "ENDLESS" : "DAY");
+    draw_text(32, 29, endless_now ? "ENDLESS" : "DAY");
+    var lab_w = string_width(endless_now ? "ENDLESS" : "DAY");
     draw_set_font(fnt_h2);
     draw_set_color(C_TEXT);
     var day_str = string(state.round_number);
-    draw_text(34, 37, day_str);
+    draw_text(38 + lab_w, 28, day_str);
     var dw = string_width(day_str);
     draw_set_font(fnt_bold);
     draw_set_color(C_FAINT);
-    if (!(state.endless_mode && state.round_number > 17)) draw_text(38 + dw, 39, "/ 17");
+    if (!endless_now) draw_text(44 + lab_w + dw, 30, "/ " + string(final_day));
     // Phase chip
     var phase_lbl = "PLANNING";
     var phase_col = C_ACCENT;
-    if (state.phase == "combat_weapons") { phase_lbl = "DEFENSE"; phase_col = C_WARN; }
+    if (state.phase == "combat_weapons" && !is_undefined(state[$ "volley"])) { phase_lbl = "VOLLEY"; phase_col = C_AMBER; }
+    else if (state.phase == "combat_weapons") { phase_lbl = "DEFENSE"; phase_col = C_WARN; }
     else if (state.phase == "combat_aliens") { phase_lbl = "UNDER ATTACK"; phase_col = C_BAD; }
     else if (state.phase == "game_over") { phase_lbl = "OVERRUN"; phase_col = C_BAD; }
     else if (state.phase == "victory") { phase_lbl = "VICTORY"; phase_col = C_GOOD; }
     draw_set_font(fnt_small);
     var pw = string_width(phase_lbl) + 18;
     var pulse = in_combat ? (0.5 + 0.5 * sin(current_time * 0.008)) : 0;
-    ui_box(200 - pw, 17, 200, 41, ui_col_mix(merge_color(phase_col, c_black, 0.75), merge_color(phase_col, c_black, 0.55), pulse), phase_col, 12);
+    ui_box(266 - pw, 17, 266, 41, ui_col_mix(merge_color(phase_col, c_black, 0.75), merge_color(phase_col, c_black, 0.55), pulse), phase_col, 12);
     draw_set_halign(fa_center);
     draw_set_color(phase_col);
-    draw_text(200 - pw * 0.5, 29, phase_lbl);
+    draw_text(266 - pw * 0.5, 29, phase_lbl);
 
     // Squad chips
     var local_idx = game_local_player_idx(state);
-    var cx = 232;
+    var cx = 290;
     state.player_tab_bounds = [];
     for (var p = 0; p < state.num_players; p++) {
         var pl = state.players[p];
@@ -113,7 +117,7 @@ function ui_draw_hud_top(state, mx, my) {
     var menu_w = 116;
     var menu_x = 1900 - menu_w;
     state.btn_settings_hover = ui_draw_button(menu_x, 11, menu_w, 36, "MENU", true, false, mx, my, "ghost", "Esc");
-    var g_w = 150;
+    var g_w = 200;
     var g_x = menu_x - 12 - g_w;
     ui_box(g_x, 11, g_x + g_w, 47, C_PANEL, C_LINE, 8);
     ui_icon_resource(g_x + 22, 29, "gold", 20);
@@ -122,6 +126,7 @@ function ui_draw_hud_top(state, mx, my) {
     draw_set_color(C_GOLD);
     var gold_disp = round(ui_anim("gold_disp", state.storage.gold, 0.15));
     draw_text(g_x + 40, 28, string(gold_disp));
+    ui_delta_pop("gold", state.storage.gold, g_x + 40 + string_width(string(gold_disp)) + 26, 26);
     draw_set_font(fnt_small);
     draw_set_color(C_FAINT);
     draw_set_halign(fa_right);
@@ -336,19 +341,23 @@ function ui_draw_board(state, mx, my) {
         if (!is_undefined(tower) && tower.alive && !is_undefined(tower.weapon) && tower.weapon.alive && tower.weapon.hp > 0) {
             var wep = tower.weapon;
             draw_set_font(fnt_small);
-            var bw = max(96, string_width(wep.name) + 44);
-            var bx0 = node.x - bw * 0.5;
-            var by0 = node.y - r - 40;
-            ui_box(bx0, by0, bx0 + bw, by0 + 26, make_color_rgb(28, 16, 20), C_WEAPON, 6);
-            ui_icon_weapon(bx0 + 14, by0 + 12, wep.catalog_id, 16, C_WEAPON);
+            var nm_w = string_width(wep.name);
+            var grp_w = 20 + 6 + nm_w;                 // icon + gap + name, centred as one group
+            var bw = grp_w + 24;
+            var bx0 = round(node.x - bw * 0.5);
+            var by0 = node.y - r - 44;
+            var gx = bx0 + 12;
+            ui_shadow(bx0, by0, bx0 + bw, by0 + 30, 6, 0.4);
+            ui_box(bx0, by0, bx0 + bw, by0 + 30, make_color_rgb(28, 16, 20), C_WEAPON, 7);
+            ui_icon_weapon(gx + 10, by0 + 13, wep.catalog_id, 18, C_WEAPON);
             draw_set_halign(fa_left); draw_set_valign(fa_middle);
             draw_set_color(C_TEXT);
-            draw_text(bx0 + 26, by0 + 10, wep.name);
-            ui_bar(bx0 + 26, by0 + 19, bw - 34, 4, wep.hp / max(1, wep.max_hp), C_WEAPON);
+            draw_text(gx + 26, by0 + 12, wep.name);
+            ui_bar(bx0 + 8, by0 + 24, bw - 16, 3, wep.hp / max(1, wep.max_hp), C_WEAPON);
             if (tower.manual_cooldown > 0) {
                 draw_set_halign(fa_center);
                 draw_set_color(C_WARN);
-                draw_text(node.x, by0 - 9, "COOLDOWN " + string(tower.manual_cooldown));
+                draw_text(node.x, by0 - 10, "COOLDOWN " + string(tower.manual_cooldown));
             }
         }
 
@@ -500,7 +509,7 @@ function ui_board_node_tooltip(state, k, node, cur_player, is_here, can_move_her
             else {
                 tip += "\nMounted: " + tow.weapon.name + "  (" + string(tow.weapon.hp) + "/" + string(tow.weapon.max_hp) + " HP, " + string(tow.weapon.damage) + " dmg)";
                 if (tow.manual_cooldown > 0) tip += "\nCooling down: " + string(tow.manual_cooldown) + " day(s)";
-                tip += "\nStand here to fire it manually [F] or dismantle it [X].";
+                tip += "\nStand here to fire it manually [F] or demolish it for materials [X].";
             }
             break;
         case "gather_forest": tip = "Forest\nGather [G] to draw from the forest deck: Wood, Scrap - and the odd surprise."; break;
@@ -606,8 +615,8 @@ function ui_log_category(log_str) {
     if (string_pos("sold", log_str) > 0 || string_pos("bought", log_str) > 0 || string_pos("reroll", log_str) > 0 || string_pos("Favor", log_str) > 0) return ["TRADE", C_GOLD, make_color_rgb(250, 238, 200)];
     if (string_pos("forged", log_str) > 0 || string_pos("mounted", log_str) > 0 || string_pos("dismantled", log_str) > 0) return ["CRAFT", C_TOWER, make_color_rgb(210, 232, 255)];
     if (string_pos("drew", log_str) > 0 || string_pos("deposited", log_str) > 0 || string_pos("retrieved", log_str) > 0) return ["LOOT", C_GOOD, make_color_rgb(210, 240, 220)];
-    if (string_pos("moved to", log_str) > 0) return ["MOVE", C_FAINT, C_DIM];
-    return ["INFO", C_FAINT, C_DIM];
+    if (string_pos("moved to", log_str) > 0) return ["MOVE", C_DIM, make_color_rgb(196, 208, 226)];
+    return ["INFO", C_DIM, make_color_rgb(208, 218, 234)];
 }
 
 /// @desc Squad comms: word-wrapped colour-coded log with scrollbar + chat input
@@ -631,16 +640,16 @@ function ui_draw_comms_log(state, mx, my) {
     // Layout cache (recomputed only when logs or width change)
     var n = array_length(state.action_logs);
     if (state.action_log_cache_dirty || (state[$ "log_cache_w"] ?? -1) != vw || !variable_struct_exists(state, "log_cache")) {
-        draw_set_font(fnt_small);
+        draw_set_font(fnt_body);
         var items = [];
         var total = 0;
-        var tag_w = 66;
+        var tag_w = 70;
         for (var i = 0; i < n; i++) {
             var str = state.action_logs[i];
             var cat = ui_log_category(str);
             var body = str;
             if (cat[0] == "CHAT") body = string_delete(str, 1, 7);
-            var h = string_height_ext(body, 16, vw - tag_w - 6) + 6;
+            var h = string_height_ext(body, -1, vw - tag_w - 6) + 8;
             array_push(items, { y: total, h: h, tag: cat[0], col: cat[1], tcol: cat[2], text: body });
             total += h;
         }
@@ -663,23 +672,24 @@ function ui_draw_comms_log(state, mx, my) {
     }
     surface_set_target(state.action_log_surf);
     draw_clear_alpha(c_black, 0);
-    draw_set_font(fnt_small);
     for (var i = 0; i < array_length(items); i++) {
         var it = items[i];
         var iy = it.y - state.action_log_scroll_y;
         if (iy + it.h < 0) continue;
         if (iy > surf_h) break;
         // Tag pill
-        draw_set_alpha(0.22);
+        draw_set_alpha(0.25);
         draw_set_color(it.col);
-        draw_roundrect_ext(0, iy + 1, 58, iy + 16, 4, 4, false);
+        draw_roundrect_ext(0, iy + 2, 62, iy + 21, 4, 4, false);
         draw_set_alpha(1);
+        draw_set_font(fnt_small);
         draw_set_halign(fa_center); draw_set_valign(fa_middle);
-        draw_set_color(it.col);
-        draw_text(29, iy + 8, it.tag);
+        draw_set_color(merge_color(it.col, c_white, 0.25));
+        draw_text(31, iy + 11, it.tag);
+        draw_set_font(fnt_body);
         draw_set_halign(fa_left); draw_set_valign(fa_top);
         draw_set_color(i == 0 ? c_white : it.tcol);
-        draw_text_ext(66, iy, it.text, 16, surf_w - 72);
+        draw_text_ext(70, iy, it.text, -1, surf_w - 76);
     }
     surface_reset_target();
     draw_surface(state.action_log_surf, vx, vy);
@@ -801,6 +811,7 @@ function ui_draw_bottom_panel(state, mx, my) {
         draw_set_font(fnt_small);
         draw_set_color(C_FAINT);
         draw_text(tx + tile_w * 0.5, ty + 67, res_names[r]);
+        ui_delta_pop("res_" + key, val, tx + tile_w * 0.5 + 24, ty + 40);
         if (ui_point_in_rect(mx, my, tx, ty, tile_w, oy2 - 10 - ty)) {
             var rdefs = game_get_resource_definitions();
             state.hover_tooltip = res_names[r] + ": " + string(val) + " in team storage" + ((key != "gold") ? ("\nSells for " + string(rdefs[$ key].sell_value) + "g each in Town") : "");
@@ -814,13 +825,49 @@ function ui_draw_bottom_panel(state, mx, my) {
     ui_draw_threat_lanes(state, mx, my);
 }
 
+/// @desc The two location-dependent actions for the operative's current position.
+/// Each entry: [label, hotkey, enabled, style, action, args, tooltip_enabled, tooltip_disabled]
+function ui_context_actions(state, pl) {
+    var can_act = !(state.is_online && pl.ended_turn) && state.phase == "player_actions";
+    var task = game_task_cost(pl);
+    var node = state.nodes[$ pl.node];
+    var view_ws = ["Workshop", "R", true, "default", "modal:repair", {}, "Open the Workshop (forge, repair and fortify happen at the Workstation).", ""];
+    var view_shop = ["Shop", "S", true, "default", "modal:shop", {}, "Browse blueprints (buy them at the Shop).", ""];
+    var view_town = ["Market", "T", true, "default", "modal:town", {}, "Check today's prices (sell at Town).", ""];
+    switch (node.type) {
+        case "gather_forest": case "gather_cave1": case "gather_cave2": case "gather_cave3":
+            var g_ok = can_act && pl.energy >= task;
+            return [["Gather  " + string(task) + "E", "G", g_ok, "success", "gather", {}, "Draw from this zone's deck (" + string(task) + " energy).", "Need " + string(task) + " energy."], view_ws];
+        case "town":
+            return [["Sell Goods", "T", true, "amber", "modal:town", {}, "Open the Market and sell resources for Gold.", ""], view_shop];
+        case "shop":
+            return [["Buy Blueprints", "S", true, "amber", "modal:shop", {}, "Open the Shop.", ""], view_town];
+        case "workstation":
+            return [["Workshop", "R", true, "primary", "modal:repair", {}, "Forge blueprints, forge metal, repair and fortify towers.", ""], view_shop];
+        case "main_base":
+            var carried = 0;
+            var keys = variable_struct_get_names(pl.backpack);
+            for (var i = 0; i < array_length(keys); i++) carried += pl.backpack[$ keys[i]];
+            return [["Deposit Pack", "E", can_act && carried > 0, "success", "deposit", {}, "Unload your backpack into team storage.", "Your pack is empty."], view_ws];
+        case "tower":
+            var tw = state.towers[node.tower_idx];
+            var has_wep = !is_undefined(tw.weapon) && tw.weapon.alive && tw.weapon.hp > 0;
+            if (!has_wep) return [["Fire", "F", false, "default", "", {}, "", tw.alive ? "No weapon mounted here - forge one at the Workshop." : "This tower is destroyed."], view_ws];
+            var fc = game_fire_cost(state, pl);
+            var gun = tw.weapon.damage > 0;
+
+            var f_ok = can_act && gun && tw.manual_cooldown <= 0 && pl.energy >= fc && array_length(state.active_zone) > 0;
+            var f_lbl = !gun ? "Support" : ((tw.manual_cooldown > 0) ? ("Cooldown " + string(tw.manual_cooldown)) : ("Fire  " + string(fc) + "E"));
+            var f_why = !gun ? "Support structures can't fire." : ((tw.manual_cooldown > 0) ? "Still cooling down." : ((array_length(state.active_zone) == 0) ? "No hostiles at the walls." : ("Need " + string(fc) + " energy.")));
+            return [[f_lbl, "F", f_ok, "amber", "@fire", {}, "Open the attack screen and aim the " + tw.weapon.name + ((tw.weapon.catalog_id == "tesla") ? " (hits every alien)" : (" (" + string(game_weapon_shots(tw.weapon)) + " shot" + ((game_weapon_shots(tw.weapon) > 1) ? "s" : "") + ")")) + ". Its effects stay on the aliens into tonight's attack.", f_why],
+                    ["Demolish", "X", can_act && pl.energy >= task, "danger", "dismantle", {}, "Tear down the " + tw.weapon.name + " (" + string(tw.weapon.hp) + "/" + string(tw.weapon.max_hp) + " HP) to free this hardpoint for a new weapon.\nSalvage: " + game_res_list_string(game_demolish_refund(tw.weapon)) + " (" + string(round(75 * tw.weapon.hp / max(1, tw.weapon.max_hp))) + "% of its materials - 75% at full health).", "Need " + string(task) + " energy."]];
+    }
+    return [view_shop, view_ws];
+}
+
 function ui_draw_action_bar(state, mx, my, pl, in_combat) {
     var L = ui_hud_layout();
     var ax1 = L.act_x1, ax2 = L.act_x2, ay1 = L.op_y1, ay2 = L.op_y2;
-    state.btn_gather_hover = false; state.btn_craft_hover = false; state.btn_dismantle_hover = false;
-    state.btn_shop_hover = false; state.btn_repair_hover = false; state.btn_town_hover = false;
-    state.btn_fire_hover = false; state.btn_endturn_hover = false; state.btn_combat_hover = false;
-
     if (in_combat || state.phase == "game_over" || state.phase == "victory") {
         ui_box(ax1, ay1, ax2, ay2, C_PANEL, C_BAD, 12);
         draw_set_font(fnt_h3);
@@ -829,67 +876,38 @@ function ui_draw_action_bar(state, mx, my, pl, in_combat) {
         draw_text((ax1 + ax2) * 0.5, (ay1 + ay2) * 0.5 - 10, "DEFENSE IN PROGRESS");
         draw_set_font(fnt_small);
         draw_set_color(C_DIM);
-        draw_text((ax1 + ax2) * 0.5, (ay1 + ay2) * 0.5 + 14, "Use the tactical display to run the guns");
+        draw_text((ax1 + ax2) * 0.5, (ay1 + ay2) * 0.5 + 16, "Use the tactical display to run the guns");
         draw_set_font(fnt_body);
         return;
     }
-
-    var can_act = !(state.is_online && pl.ended_turn);
-    var task_cost = game_task_cost(pl);
-    var node = state.nodes[$ pl.node];
-    var ti = game_player_tower_idx(pl);
-    var tw = (ti >= 0) ? state.towers[ti] : undefined;
-    var has_any_wep = !is_undefined(tw) && !is_undefined(tw.weapon) && tw.weapon.alive && tw.weapon.hp > 0;
-    var has_gun = has_any_wep && tw.weapon.damage > 0;
-    var fire_cost = game_fire_cost(state, pl);
-
-    var can_gather = can_act && pl.energy >= task_cost && (node.type == "gather_forest" || string_pos("gather_cave", node.type) > 0);
-    var can_craft = can_act && pl.energy >= task_cost && (pl.node == "main_base" || pl.node == "workstation") && state.storage.stone >= 1 && state.storage.scrap >= 1;
-    var can_dismantle = can_act && has_any_wep && pl.energy >= task_cost;
-    var can_fire = can_act && has_gun && tw.manual_cooldown <= 0 && pl.energy >= fire_cost && array_length(state.active_zone) > 0;
-
-    var bw = floor((ax2 - ax1 - 3 * 8) / 4);
-    var bh = 50;
-    var r1 = ay1, r2 = ay1 + bh + 12;
-
-    state.btn_gather_hover = ui_draw_button(ax1, r1, bw, bh, "Gather " + string(task_cost) + "E", can_gather, false, mx, my, can_gather ? "success" : "default", "G");
-    if (state.btn_gather_hover) state.hover_tooltip = "Draw a card from this zone's deck (" + string(task_cost) + " energy).";
-    else if (!can_gather && ui_point_in_rect(mx, my, ax1, r1, bw, bh)) state.hover_tooltip = "Move to the Forest or a Cave to gather.";
-
-    if (has_any_wep) {
-        state.btn_dismantle_hover = ui_draw_button(ax1 + (bw + 8), r1, bw, bh, "Dismantle", can_dismantle, false, mx, my, "danger", "X");
-        if (state.btn_dismantle_hover) state.hover_tooltip = "Scrap the " + tw.weapon.name + " to free this hardpoint (+1 Scrap).";
-    } else {
-        state.btn_craft_hover = ui_draw_button(ax1 + (bw + 8), r1, bw, bh, "Forge Metal", can_craft, false, mx, my, "default", "C");
-        if (ui_point_in_rect(mx, my, ax1 + (bw + 8), r1, bw, bh)) state.hover_tooltip = "Turn 1 Stone + 1 Scrap into 1 Metal at the Main Base or Workstation (" + string(task_cost) + " energy).";
+    var gap = 10;
+    var bw = floor((ax2 - ax1 - gap) / 2);
+    var bh = floor((ay2 - ay1 - gap) / 2);
+    var acts = ui_context_actions(state, pl);
+    for (var i = 0; i < 2; i++) {
+        var a = acts[i];
+        var bx = ax1 + i * (bw + gap);
+        // Smooth label swap when the context changes
+        var key = "ctx" + string(i);
+        var prev = global.ui_anim_state[$ key + "_lbl"];
+        if (is_undefined(prev) || prev != a[0]) { global.ui_anim_state[$ key + "_lbl"] = a[0]; global.ui_anim_state[$ key + "_pop"] = 0; }
+        var pop = ui_anim(key + "_pop", 1, 0.2);
+        draw_set_alpha(0.4 + 0.6 * pop);
+        ui_action_button(state, bx, ay1 + (1 - pop) * 6, bw, bh, a[0], a[2], a[3], a[1], a[4], a[5], a[6], a[7], mx, my);
+        draw_set_alpha(1);
     }
-    state.btn_shop_hover = ui_draw_button(ax1 + 2 * (bw + 8), r1, bw, bh, "Shop", true, pl.node == "shop", mx, my, "default", "S");
-    if (state.btn_shop_hover) state.hover_tooltip = (pl.node == "shop") ? "Browse and buy weapon blueprints." : "Preview the shop (go to the Shop to buy).";
-    state.btn_repair_hover = ui_draw_button(ax1 + 3 * (bw + 8), r1, bw, bh, "Workshop", true, pl.node == "workstation", mx, my, "default", "R");
-    if (state.btn_repair_hover) state.hover_tooltip = "Forge blueprints onto towers and repair defenses (at the Workstation).";
-
-    state.btn_town_hover = ui_draw_button(ax1, r2, bw, bh, "Market", true, pl.node == "town", mx, my, "default", "T");
-    if (state.btn_town_hover) state.hover_tooltip = "Sell resources for Gold (at Town). Today's favor: " + state.town_favors[state.active_town_favor].name;
-    var fire_lbl = has_gun ? ((tw.manual_cooldown > 0) ? ("Cooldown " + string(tw.manual_cooldown)) : ("Fire " + string(fire_cost) + "E")) : "Fire";
-    state.btn_fire_hover = ui_draw_button(ax1 + (bw + 8), r2, bw, bh, fire_lbl, can_fire, false, mx, my, can_fire ? "amber" : "default", "F");
-    if (ui_point_in_rect(mx, my, ax1 + (bw + 8), r2, bw, bh)) {
-        if (!has_gun) state.hover_tooltip = "Stand on an armed tower to fire its weapon at an active alien.";
-        else if (array_length(state.active_zone) == 0) state.hover_tooltip = "No hostiles in range.";
-        else state.hover_tooltip = "Fire " + tw.weapon.name + " at the first valid target (or click an alien card).";
-    }
-
+    var y2 = ay1 + bh + gap;
     if (state.is_online) {
         var ready_n = 0;
         for (var p = 0; p < state.num_players; p++) if (state.players[p].ended_turn || state.players[p].energy <= 0) ready_n++;
-        var lbl = pl.ended_turn ? ("Waiting " + string(ready_n) + "/" + string(state.num_players)) : "Ready Up";
-        state.btn_endturn_hover = ui_draw_button(ax1 + 2 * (bw + 8), r2, bw * 2 + 8, bh, lbl, !pl.ended_turn, false, mx, my, "primary", "Space");
-        if (state.btn_endturn_hover) state.hover_tooltip = "Finish your actions for today. The defense phase starts when the whole squad is ready.";
+        var lbl = pl.ended_turn ? ("Waiting for squad  " + string(ready_n) + "/" + string(state.num_players)) : "Ready Up";
+        ui_action_button(state, ax1, y2, ax2 - ax1, bh, lbl, !pl.ended_turn, "primary", "Space", "end_turn", {},
+            "Finish your actions for today. The defense phase starts when the whole squad is ready.", "You're ready - waiting on the rest of the squad.", mx, my);
     } else {
-        state.btn_endturn_hover = ui_draw_button(ax1 + 2 * (bw + 8), r2, bw, bh, "End Turn", true, false, mx, my, "default", "Space");
-        if (state.btn_endturn_hover) state.hover_tooltip = "Pass to the next operative with energy left.";
+        ui_action_button(state, ax1, y2, bw, bh, "End Turn", true, "default", "Space", "end_turn", {}, "Pass to the next operative with energy left.", "", mx, my);
         var threats = array_length(state.active_zone);
-        state.btn_combat_hover = ui_draw_button(ax1 + 3 * (bw + 8), r2, bw, bh, threats > 0 ? "Defend!" : "Next Day", true, true, mx, my, threats > 0 ? "danger" : "primary", "B");
-        if (state.btn_combat_hover) state.hover_tooltip = (threats > 0) ? "End everyone's turn and start the defense phase." : "No hostiles at the walls - end the day.";
+        ui_action_button(state, ax1 + bw + gap, y2, bw, bh, (threats > 0) ? "Defend!" : "Next Day", true, (threats > 0) ? "danger" : "primary", "B", "begin_defense", {},
+            (threats > 0) ? "End everyone's turn and start the defense phase." : "No hostiles at the walls - end the day.", "", mx, my);
     }
 }
 
@@ -928,6 +946,7 @@ function ui_draw_threat_lanes(state, mx, my) {
 
     // ---- Active lane ----
     y1 = L.lane_act_y1; y2 = L.lane_act_y2;
+    var lane_dying = (is_undefined(state.modal) || state.modal.type != "tactical_combat");
     var n_act = array_length(state.active_zone);
     var hot = n_act > 0;
     ui_box(L.op_x1, y1, L.act_x2, y2, C_PANEL, hot ? merge_color(C_BAD, C_PANEL, 0.4) : C_LINE, 12);
@@ -952,7 +971,9 @@ function ui_draw_threat_lanes(state, mx, my) {
     var zone_x = L.op_x1 + L.lane_label_w + 12;
     var zone_w = L.act_x2 - 12 - zone_x;
     var card_h = y2 - y1 - 28;
-    var total_w = (n_act > 0) ? (n_act * L.card_step - (L.card_step - L.card_w)) : 0;
+    var lane_order = ui_alien_display_order(state, "order_lane");
+    var n_disp = array_length(lane_order);
+    var total_w = (n_disp > 0) ? (n_disp * L.card_step - (L.card_step - L.card_w)) : 0;
     var max_scroll = max(0, total_w - zone_w);
     state.active_aliens_scroll_x = clamp(state.active_aliens_scroll_x, 0, max_scroll);
     if (ui_point_in_rect(mx, my, zone_x, y1, zone_w, y2 - y1) && max_scroll > 0) {
@@ -961,7 +982,7 @@ function ui_draw_threat_lanes(state, mx, my) {
     }
     var smooth_x = ui_anim("act_scroll", state.active_aliens_scroll_x, 0.3);
 
-    if (n_act == 0) {
+    if (n_disp == 0) {
         draw_set_font(fnt_body);
         draw_set_halign(fa_left); draw_set_valign(fa_middle);
         draw_set_color(C_FAINT);
@@ -978,13 +999,23 @@ function ui_draw_threat_lanes(state, mx, my) {
         var in_zone = (mx >= zone_x && mx <= zone_x + zone_w);
         var m_rel_x = in_zone ? (mx - zone_x) : -9999;
         var m_rel_y = my - (y1 + 5);
-        for (var a = 0; a < n_act; a++) {
-            var cx = a * L.card_step - smooth_x;
+        var idx_of = {};
+        for (var a = 0; a < n_act; a++) idx_of[$ string(state.active_zone[a].uid)] = a;
+        for (var oi = 0; oi < n_disp; oi++) {
+            var uid_s = string(lane_order[oi]);
+            var cx = ui_anim("lax" + uid_s, oi * L.card_step, 0.18) - smooth_x;
             if (cx + L.card_w < 0 || cx > surf_w) continue;
-            ui_draw_alien_card(state, cx, 3, L.card_w, card_h, state.active_zone[a], true, m_rel_x, m_rel_y, a);
+            if (variable_struct_exists(idx_of, uid_s)) {
+                var a2 = idx_of[$ uid_s];
+                ui_draw_alien_card(state, cx, 3, L.card_w, card_h, state.active_zone[a2], true, m_rel_x, m_rel_y, a2);
+            } else {
+                ui_draw_dead_card(cx, 3, L.card_w, card_h, ui_find_dying(state, lane_order[oi]));
+            }
         }
         surface_reset_target();
         draw_surface(state.active_aliens_surf, zone_x, y1 + 5);
+    }
+    if (n_disp > 0) {
 
         if (max_scroll > 0) {
             var bar_y = y2 - 14;
@@ -1081,7 +1112,7 @@ function ui_draw_alien_card(state, cx, cy, cw, ch, alien, is_active, mx, my, ali
         var tip = alien.name + "  (Tier " + string(alien.tier) + ")\nHP " + string(alien.hp) + "/" + string(alien.max_hp) + "   Attack " + string(alien.damage) + "\n" + alien.ability;
         if (is_active && state.phase == "player_actions") {
             if (locked) tip += "\n[A Scout is alive - it must be targeted first]";
-            else if (can_pilot) tip += "\n[Click to fire " + tw.weapon.name + " at this alien]";
+            else if (can_pilot) tip += "\n[Click to open the attack screen for the " + tw.weapon.name + "]";
             else tip += "\n[Click for full intel]";
         } else tip += "\n[Click for full intel]";
         state.hover_tooltip = tip;
@@ -1104,7 +1135,12 @@ function ui_draw_banner(state) {
     var cy = 300;
     if (!is_undefined(state.modal) && state.modal.type == "tactical_combat") cy = 520;
     var col = state.turn_popup_color;
-    var w = 1000 * ease;
+    draw_set_font(fnt_h1);
+    var need_w = string_width(state.turn_popup_title);
+    draw_set_font(fnt_h3);
+    need_w = max(need_w, string_width(state.turn_popup_message));
+    var full_w = clamp(need_w + 120, 1000, 1760);
+    var w = full_w * ease;
     draw_set_alpha(0.82 * a);
     draw_set_color(make_color_rgb(6, 9, 15));
     draw_rectangle(960 - w * 0.5, cy - 58, 960 + w * 0.5, cy + 58, false);
@@ -1118,7 +1154,7 @@ function ui_draw_banner(state) {
     ui_text_shadow(960 - slide, cy - 14, state.turn_popup_title, col);
     draw_set_font(fnt_h3);
     draw_set_color(C_TEXT);
-    draw_text(960 + slide, cy + 28, state.turn_popup_message);
+    draw_text(960 + slide, cy + 28, ui_fit_text(state.turn_popup_message, full_w - 60));
     draw_set_alpha(1);
     draw_set_font(fnt_body);
 }
@@ -1152,9 +1188,12 @@ function ui_draw_toast(state) {
 function ui_draw_tooltip(state, mx, my) {
     if (state.hover_tooltip == "") return;
     var tip = state.hover_tooltip;
+    if ((state[$ "tip_last"] ?? "") != tip) { state.tip_last = tip; state.tip_t = 0; }
+    state.tip_t = min(1, (state[$ "tip_t"] ?? 1) + 0.2);
+    draw_set_alpha(state.tip_t);
     draw_set_font(fnt_body);
-    var tw = string_width_ext(tip, 20, 420) + 26;
-    var th = string_height_ext(tip, 20, 420) + 20;
+    var tw = string_width_ext(tip, 22, 440) + 26;
+    var th = string_height_ext(tip, 22, 440) + 22;
     var tx = clamp(mx + 18, 10, 1910 - tw);
     var ty = clamp(my + 20, 10, 1070 - th);
     if (my + 20 + th > 1070) ty = my - th - 12;
@@ -1170,12 +1209,13 @@ function ui_draw_tooltip(state, mx, my) {
         draw_set_color(c_white);
         draw_text(tx + 13, ty + 9, string_copy(tip, 1, nl - 1));
         draw_set_font(fnt_body);
-        draw_set_color(C_DIM);
-        draw_text_ext(tx + 13, ty + 9 + 20, string_delete(tip, 1, nl), 20, 420);
+        draw_set_color(make_color_rgb(190, 202, 222));
+        draw_text_ext(tx + 13, ty + 9 + 22, string_delete(tip, 1, nl), 22, 440);
     } else {
         draw_set_color(C_TEXT);
-        draw_text_ext(tx + 13, ty + 9, tip, 20, 420);
+        draw_text_ext(tx + 13, ty + 9, tip, 22, 440);
     }
+    draw_set_alpha(1);
     state.hover_tooltip = "";
 }
 
@@ -1229,10 +1269,10 @@ function ui_draw_pause_menu(state, mx, my) {
 function ui_draw_help(state, mx, my) {
     var w = 1360, h = 800;
     var x0 = 960 - w * 0.5, y0 = 540 - h * 0.5;
-    ui_panel(x0, y0, w, h, "HOW TO PLAY", C_ACCENT, "survive 17 days of alien attacks");
+    ui_panel(x0, y0, w, h, "HOW TO PLAY", C_ACCENT, "survive 20 days of alien attacks");
     var col_w = (w - 80) / 3;
     var sections = [
-        ["THE GOAL", C_AMBER, "Keep at least one of the four base towers standing until the end of Day 17 - and clear the final wave.\n\nEach day has two phases: PLANNING, where your squad spends energy, and DEFENSE, where mounted weapons fire and the aliens strike back."],
+        ["THE GOAL", C_AMBER, "Keep at least one of the four base towers standing until the end of Day 20 - and clear the final wave.\n\nEach day has two phases: PLANNING, where your squad spends energy, and DEFENSE, where mounted weapons fire and the aliens strike back."],
         ["YOUR DAY", C_ACCENT, "Every operative has energy (the yellow bar). Moving along a path costs 1-2 energy; most tasks cost 1.\n\nGather at the Forest and Caves, sell loot in Town for Gold, buy weapon blueprints at the Shop, then forge them onto towers at the Workstation."],
         ["DEFENSE", C_BAD, "When everyone is out of energy (or you press Defend), each mounted weapon picks targets. Click a weapon, then click an alien.\n\nAliens that survive hit your towers - weapons on a tower absorb the blows first. Repair at the Workstation."]
     ];
@@ -1292,6 +1332,7 @@ function ui_draw_help(state, mx, my) {
 /// @desc Renders the full GUI for the current screen
 function ui_draw_gui(state, mx, my) {
     ui_begin_frame();
+    state.ui_click_action = undefined;
     
     if (state.screen != "game") {
         switch (state.screen) {
@@ -1304,6 +1345,7 @@ function ui_draw_gui(state, mx, my) {
         if (!is_undefined(state.modal)) ui_draw_modals(state, mx, my);
         ui_draw_tooltip(state, mx, my);
         ui_draw_transition(state);
+        if (autotest_active() && (global.at[$ "gallery"] ?? false)) ui_draw_weapon_icon_gallery();
         return;
     }
     
@@ -1315,11 +1357,14 @@ function ui_draw_gui(state, mx, my) {
     
     draw_set_color(C_BG0);
     draw_rectangle(0, 0, 1920, 1080, false);
-    ui_draw_hud_top(state, mx, my);
-    ui_draw_board(state, mx, my);
-    ui_draw_right_panel(state, mx, my);
-    ui_draw_bottom_panel(state, mx, my);
-    
+    var bmx = mx, bmy = my;
+    if (!is_undefined(state.modal)) { bmx = -100000; bmy = -100000; }
+    ui_draw_hud_top(state, bmx, bmy);
+    ui_draw_board(state, bmx, bmy);
+    ui_draw_right_panel(state, bmx, bmy);
+    ui_draw_bottom_panel(state, bmx, bmy);
+    if (!is_undefined(state.modal)) { state.hover_tooltip = ""; state.active_alien_hover = -1; }
+
     if (state.phase == "game_over" && is_undefined(state.modal)) state.modal = { type: "game_over" };
     ui_draw_modals(state, mx, my);
     
@@ -1328,6 +1373,7 @@ function ui_draw_gui(state, mx, my) {
     ui_draw_toast(state);
     ui_draw_tooltip(state, mx, my);
     ui_draw_transition(state);
+    if (autotest_active() && (global.at[$ "gallery"] ?? false)) ui_draw_weapon_icon_gallery();
 }
 
 // =============================================================================
@@ -1343,6 +1389,7 @@ function ui_modal_title(cx, ty, text, col) {
 /// @desc Geometry shared by the settings drawing and its input handling
 function ui_settings_layout(mx0, my0, mw, mh) {
     var bw3 = floor((mw - 80 - 24) / 3);
+    draw_set_font(fnt_body);
     var bw4 = floor((mw - 80 - 36) / 4);
     return {
         mode_y: my0 + 100, mode_w: bw3, mode_h: 44,
@@ -1382,9 +1429,16 @@ function ui_draw_settings(state, mx, my, mx0, my0, mw, mh) {
     
     ui_section_label(S.x0, S.res_y - 18, "Window size (windowed mode)");
     state.settings_res_hover = -1;
-    for (var r = 0; r < array_length(state.resolutions); r++) {
-        if (ui_draw_button(S.x0 + r * (S.res_w + 12), S.res_y, S.res_w, S.res_h, state.resolutions[r][2], true, state.settings.resolution_idx == r, mx, my)) state.settings_res_hover = r;
-    }
+    var ri = state.settings.resolution_idx;
+    state.settings_res_prev_hover = ui_draw_button(S.x0, S.res_y, 52, S.res_h, "<", ri > 0, false, mx, my);
+    ui_box(S.x0 + 60, S.res_y, S.x0 + 360, S.res_y + S.res_h, C_BG1, C_LINE_HI, 6);
+    draw_set_font(fnt_h3); draw_set_halign(fa_center); draw_set_valign(fa_middle);
+    draw_set_color(C_TEXT);
+    draw_text(S.x0 + 210, S.res_y + S.res_h * 0.5, state.resolutions[ri][2]);
+    state.settings_res_next_hover = ui_draw_button(S.x0 + 368, S.res_y, 52, S.res_h, ">", ri < array_length(state.resolutions) - 1, false, mx, my);
+    draw_set_font(fnt_small); draw_set_halign(fa_left);
+    draw_set_color(C_FAINT);
+    draw_text(S.x0 + 440, S.res_y + S.res_h * 0.5, "Sizes bigger than your monitor are scaled to fit.");
     
     ui_section_label(S.x0, S.sfx_y - 34, "Audio");
     draw_set_font(fnt_bold);
@@ -1421,7 +1475,7 @@ function ui_draw_end_screen(state, mx, my, mx0, my0, mw, mh, won) {
     ui_text_shadow(cx, my0 + 80, won ? "VICTORY" : "BASE OVERRUN", col);
     draw_set_font(fnt_h3);
     draw_set_color(C_TEXT);
-    draw_text(cx, my0 + 128, won ? "The outpost held. Seventeen days of hell - and you're still standing." : "The last tower has fallen. The swarm takes the outpost.");
+    draw_text(cx, my0 + 128, won ? "The outpost held. Twenty days of hell - and you're still standing." : "The last tower has fallen. The swarm takes the outpost.");
     
     // Stats
     var towers_up = 0; for (var t = 0; t < 4; t++) if (state.towers[t].alive) towers_up++;
@@ -1582,7 +1636,11 @@ function ui_draw_combat_alien_card(state, x, y, w, h, al, idx, hov, locked, is_s
     // Ability (one or two lines)
     draw_set_halign(fa_left); draw_set_valign(fa_top);
     draw_set_color(C_FAINT);
-    if (array_length(chips) == 0) draw_text_ext(x + 10, hp_y + 34, al.ability, 15, w - 20);
+    if (array_length(chips) == 0) {
+        draw_set_font(fnt_small);
+        var ab_lines = max(1, floor((y0 + h - 8 - (hp_y + 34)) / 18));
+        draw_text_ext(x + 10, hp_y + 34, ui_wrap_clamp(al.ability, w - 20, ab_lines), 18, w - 20);
+    }
 
     if (is_scout) {
         ui_pill(x + w - 78, y0 - 10, "PRIORITY", make_color_rgb(70, 50, 10), C_AMBER, C_AMBER, 20);
@@ -1664,6 +1722,7 @@ function ui_draw_combat_tower_card(state, t, x, y, w, h, mx, my) {
     var st_lbl = "READY", st_col = C_GOOD;
     if (wep.disabled) { st_lbl = "EMP DISABLED"; st_col = C_ACCENT; }
     else if (wep.damage <= 0) { st_lbl = "SUPPORT"; st_col = C_DIM; }
+    else if (used && !is_undefined(state[$ "volley"]) && state.volley.tower != t) { st_lbl = "STANDBY"; st_col = C_FAINT; }
     else if (used && state.tower_weapon_max_shots[t] == 0) { st_lbl = "CHARGING"; st_col = C_WARN; }
     else if (used) { st_lbl = "SPENT"; st_col = C_FAINT; }
     else if (sel) { st_lbl = "ARMED"; st_col = C_ACCENT; }
@@ -1708,7 +1767,8 @@ function ui_draw_combat_tower_card(state, t, x, y, w, h, mx, my) {
     // Ability
     draw_set_halign(fa_left); draw_set_valign(fa_top);
     draw_set_color(used ? C_FAINT : C_DIM);
-    draw_text_ext(xo + 16, y + 156, wep.ability, 17, w - 32);
+    draw_set_font(fnt_small);
+    draw_text_ext(xo + 16, y + 156, ui_wrap_clamp(wep.ability, w - 32, max(1, floor((h - 50 - 8 - 156) / 18))), 18, w - 32);
 
     // Footer
     var fy = y + h - 50;
@@ -1719,6 +1779,7 @@ function ui_draw_combat_tower_card(state, t, x, y, w, h, mx, my) {
         draw_set_halign(fa_center); draw_set_valign(fa_middle);
         var hint = "", hcol = C_FAINT;
         if (!phase_w) hint = used ? "Spent for today" : "Standing by";
+        else if (used && st_lbl == "STANDBY") hint = "Not part of this volley";
         else if (used) hint = (st_lbl == "CHARGING") ? "Railgun capacitor charging - ready next wave" : "All shots fired this wave";
         else if (sel) { hint = "Click an alien to fire"; hcol = C_ACCENT; }
         else { hint = "Click or press " + string(t + 1) + " to arm"; hcol = C_AMBER; }
@@ -1727,4 +1788,220 @@ function ui_draw_combat_tower_card(state, t, x, y, w, h, mx, my) {
     }
     draw_set_font(fnt_body);
     return res;
+}
+
+// =============================================================================
+// COMBAT FX: DEATH ANIMATIONS & SPLASH / PIERCE ARCS
+// =============================================================================
+/// @desc Alien death: white flash and swell, then it buckles, sinks and fades while goo splatters
+function ui_draw_dying_alien(d, px, py, size, p = -1) {
+    if (p < 0) p = 1 - d.life / d.max_life;
+    var a0 = draw_get_alpha();
+    var sc = (p < 0.15) ? (1 + p * 1.6) : max(0.05, 1.24 - (p - 0.15) * 1.35);
+    var flash = clamp(1 - p * 3, 0, 1);
+    // Expanding goo ring
+    var ring_col = (d.tier == 1) ? make_color_rgb(120, 230, 110) : ((d.tier == 2) ? make_color_rgb(250, 170, 60) : make_color_rgb(240, 70, 90));
+    draw_set_alpha(a0 * (1 - p) * 0.8);
+    draw_set_color(ring_col);
+    draw_circle(px, py, size * (0.4 + p * 0.9), true);
+    draw_circle(px, py, size * (0.38 + p * 0.85), true);
+    // Splatter droplets (deterministic per alien)
+    for (var i = 0; i < 9; i++) {
+        var ang = (d.uid * 37 + i * 40) mod 360;
+        var dist = size * (0.2 + p * (0.6 + (i mod 3) * 0.25));
+        draw_circle(px + lengthdir_x(dist, ang), py + lengthdir_y(dist, ang) + p * p * 30, max(1, size * 0.07 * (1 - p)), false);
+    }
+    // The creature itself
+    draw_set_alpha(a0 * clamp(1.15 - p, 0, 1));
+    ui_draw_alien_glyph(px, py + p * size * 0.35, d.cat, d.tier, size * sc, current_time / 1000, flash);
+    // Cross-out at the end
+    if (p > 0.35) {
+        draw_set_alpha(a0 * (1 - p) * 1.6);
+        draw_set_color(C_BAD);
+        var r = size * 0.4;
+        draw_line_width(px - r, py - r, px + r, py + r, 4);
+        draw_line_width(px - r, py + r, px + r, py - r, 4);
+    }
+    draw_set_alpha(a0);
+}
+
+/// @desc Railgun pierce beams (jagged) and plasma mortar lobs (arcing orb) between aliens
+function ui_draw_combat_arcs(state) {
+    for (var i = 0; i < array_length(state.combat_arcs); i++) {
+        var ar = state.combat_arcs[i];
+        var p = 1 - ar.life / ar.max_life;
+        var head = min(1, p * 2.6);
+        var fade = clamp((1 - p) * 1.6, 0, 1);
+        if (ar.s == "beam") {
+            var segs = 10;
+            var px = ar.x1, py = ar.y1;
+            for (var k = 1; k <= segs; k++) {
+                var tt = k / segs;
+                if (tt > head) break;
+                var jx = (k == segs) ? 0 : sin(ar.seed + k * 12.9898 + current_time * 0.03) * 14;
+                var jy = (k == segs) ? 0 : cos(ar.seed * 0.7 + k * 78.233 + current_time * 0.025) * 14;
+                var nx = lerp(ar.x1, ar.x2, tt) + jx, ny = lerp(ar.y1, ar.y2, tt) + jy;
+                draw_set_alpha(fade * 0.5);
+                draw_set_color(ar.c);
+                draw_line_width(px, py, nx, ny, 9);
+                draw_set_alpha(fade);
+                draw_line_width(px, py, nx, ny, 4);
+                draw_set_color(c_white);
+                draw_line_width(px, py, nx, ny, 2);
+                px = nx; py = ny;
+            }
+            ui_glow(px, py, 40, ar.c, 0.5 * fade);
+        } else {
+            // Lob: parabola with a glowing orb at its head and a fading trail
+            var hgt = 90 + abs(ar.x2 - ar.x1) * 0.15;
+            var steps = 16;
+            var lx = ar.x1, ly = ar.y1;
+            for (var k = 1; k <= steps; k++) {
+                var tt = head * k / steps;
+                var nx = lerp(ar.x1, ar.x2, tt);
+                var ny = lerp(ar.y1, ar.y2, tt) - sin(tt * pi) * hgt;
+                draw_set_alpha(fade * (k / steps) * 0.85);
+                draw_set_color(ar.c);
+                draw_line_width(lx, ly, nx, ny, 2 + 4 * k / steps);
+                lx = nx; ly = ny;
+            }
+            draw_set_alpha(fade);
+            ui_glow(lx, ly, 34, ar.c, 0.6 * fade);
+            draw_set_color(c_white);
+            draw_circle(lx, ly, 5, false);
+        }
+        draw_set_alpha(1);
+    }
+}
+
+// =============================================================================
+// DEAD ALIEN CARDS: hold for 1.5 s, then collapse away
+// =============================================================================
+#macro DEATH_HOLD_FRAMES 90
+#macro DEATH_OUT_FRAMES 24
+
+/// @desc Display order of alien cards: living aliens plus recently killed ones still on screen.
+/// Dead aliens keep their slot until their card has finished disappearing, so the row doesn't jump.
+function ui_alien_display_order(state, key) {
+    var prev = state[$ key] ?? [];
+    var alive = {};
+    for (var a = 0; a < array_length(state.active_zone); a++) alive[$ string(state.active_zone[a].uid)] = true;
+    var dying = {};
+    for (var d = 0; d < array_length(state.dying_aliens); d++) dying[$ string(state.dying_aliens[d].uid)] = true;
+    var out = [];
+    var seen = {};
+    for (var i = 0; i < array_length(prev); i++) {
+        var u = string(prev[i]);
+        if (variable_struct_exists(alive, u) || variable_struct_exists(dying, u)) { array_push(out, prev[i]); seen[$ u] = true; }
+    }
+    for (var a = 0; a < array_length(state.active_zone); a++) {
+        var uid = state.active_zone[a].uid;
+        if (!variable_struct_exists(seen, string(uid))) array_push(out, uid);
+    }
+    state[$ key] = out;
+    return out;
+}
+
+function ui_find_dying(state, uid) {
+    for (var d = 0; d < array_length(state.dying_aliens); d++) if (state.dying_aliens[d].uid == uid) return state.dying_aliens[d];
+    return undefined;
+}
+
+/// @desc A killed alien's card: death animation, then an ELIMINATED stamp, then it folds away
+function ui_draw_dead_card(x, y, w, h, d) {
+    if (is_undefined(d)) return;
+    var e = d.max_life - d.life;
+    var k = clamp((e - DEATH_HOLD_FRAMES) / DEATH_OUT_FRAMES, 0, 1);
+    if (k >= 1) return;
+    var a0 = draw_get_alpha();
+    var ease = k * k;
+    var hh = h * (1 - ease * 0.92);
+    var cy = y + h * 0.5;
+    var y0 = cy - hh * 0.5;
+    var x0 = x + w * ease * 0.06;
+    var w0 = w * (1 - ease * 0.12);
+    draw_set_alpha(a0 * (1 - k));
+    var fl = clamp(1 - e / 10, 0, 1);
+    ui_box(x0, y0, x0 + w0, y0 + hh, ui_col_mix(make_color_rgb(28, 14, 20), c_white, fl * 0.6), ui_col_mix(C_BAD_D, c_white, fl), 10);
+    if (k <= 0) {
+        draw_set_font(fnt_bold);
+        draw_set_halign(fa_left); draw_set_valign(fa_middle);
+        draw_set_color(C_FAINT);
+        var nm = ui_fit_text(d[$ "name"] ?? "", w - 20);
+        draw_text(x + 10, y + 17, nm);
+        draw_set_color(C_FAINT);
+        draw_line(x + 10, y + 17, x + 10 + string_width(nm), y + 17);
+        var art = min(w * 0.5, 70);
+        if (e < 45) {
+            ui_draw_dying_alien(d, x + w * 0.5, y + h * 0.42, art, e / 45);
+        } else {
+            draw_set_font(fnt_h3);
+            draw_set_halign(fa_center); draw_set_valign(fa_middle);
+            var stamp_a = clamp((e - 45) / 8, 0, 1);
+            draw_set_alpha(a0 * stamp_a);
+            var sw = min(w - 16, string_width("ELIMINATED") + 22);
+            ui_box(x + w * 0.5 - sw * 0.5, y + h * 0.42 - 16, x + w * 0.5 + sw * 0.5, y + h * 0.42 + 16, make_color_rgb(40, 10, 14), C_BAD, 6);
+            draw_set_color(C_BAD);
+            draw_text(x + w * 0.5, y + h * 0.42, "ELIMINATED");
+            draw_set_alpha(a0);
+        }
+        ui_bar(x + 10, y + h - 40, w - 20, 7, 0, C_BAD);
+        draw_set_font(fnt_small);
+        draw_set_halign(fa_left); draw_set_valign(fa_middle);
+        draw_set_color(C_FAINT);
+        draw_text(x + 10, y + h - 20, "0 / " + string(d[$ "mh"] ?? 0));
+    }
+    draw_set_alpha(a0);
+    draw_set_font(fnt_body);
+}
+
+/// @desc Hover text for an alien card on the attack screen: what it is, what it does, and its current status
+function ui_combat_alien_tip(state, al, locked) {
+    var tier = al[$ "tier"] ?? 1;
+    var atk = al.damage;
+    var scream = 0;
+    for (var i = 0; i < array_length(state.active_zone); i++) {
+        var o = state.active_zone[i];
+        if (o.alive && o.catalog_id == "screamer" && o != al) scream++;
+    }
+    if (al.catalog_id == "screamer") scream = 0;
+    var tip = al.name + "  -  Tier " + string(tier) + "\n";
+    tip += "HP " + string(max(0, al.hp)) + " / " + string(al.max_hp) + "     Attack " + string(atk) + ((scream > 0) ? (" (+" + string(scream) + " from Screamer)") : "") + "\n";
+    tip += al.ability;
+    if (al.catalog_id == "hatcher") tip += "\nNext brood: " + (((al[$ "broods"] ?? 0) == 0) ? "1 Hatchling" : "2 Hatchlings") + " at the end of the day.";
+    if (al.frozen) tip += "\nFROZEN: deals 0 damage on its next attack.";
+    if (al.vulnerable) tip += "\nBURNING: takes +1 damage from every hit this turn.";
+    if (al.tesla_weakened) tip += "\nSHOCKED: deals 1 less damage on its next attack.";
+    if (state.combat_subphase == "player_weapons") {
+        if (locked) tip += "\nA Scout is alive - shoot the Scout first.";
+        else {
+            var st_i = state.combat_selected_tower;
+            if (st_i >= 0 && st_i < 4 && !state.tower_weapon_used[st_i] && !is_undefined(state.towers[st_i].weapon)) tip += "\n[Click to fire the " + state.towers[st_i].weapon.name + " at it]";
+        }
+    }
+    return tip;
+}
+
+/// @desc Floating "+3" / "-2" that rises from a counter whenever its value changes
+function ui_delta_pop(key, val, px, py) {
+    if (!variable_global_exists("ui_pops")) global.ui_pops = {};
+    var p = global.ui_pops[$ key];
+    if (is_undefined(p)) { global.ui_pops[$ key] = { v: val, d: 0, t: 0 }; return; }
+    if (val != p.v) {
+        p.d = ((p.t > 0) ? p.d : 0) + (val - p.v);
+        p.v = val;
+        p.t = 70;
+    }
+    if (p.t <= 0 || p.d == 0) return;
+    p.t -= 1;
+    var k = p.t / 70;
+    draw_set_alpha(min(1, k * 3));
+    draw_set_font(fnt_bold);
+    draw_set_halign(fa_center); draw_set_valign(fa_middle);
+    var txt = ((p.d > 0) ? "+" : "") + string(p.d);
+    draw_set_color(c_black);
+    draw_text(px + 1, py - (1 - k) * 24 + 1, txt);
+    draw_set_color((p.d > 0) ? C_GOOD : C_BAD);
+    draw_text(px, py - (1 - k) * 24, txt);
+    draw_set_alpha(1);
 }

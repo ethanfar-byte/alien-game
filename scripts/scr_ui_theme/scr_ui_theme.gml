@@ -67,14 +67,14 @@ function ui_col_mix(c1, c2, t) {
 /// @desc Draws text at a visual scale using the closest crisp font instead of stretching the bitmap
 function ui_text_scaled(tx, ty, str, scale) {
     var prev = draw_get_font();
-    var want = 15 * scale;
-    var f = fnt_body; var fpx = 15;
+    var want = 17 * scale;
+    var f = fnt_body; var fpx = 17;
     if (want >= 80) { f = fnt_title; fpx = 96; }
-    else if (want >= 31) { f = fnt_h1; fpx = 38; }
-    else if (want >= 22) { f = fnt_h2; fpx = 25; }
-    else if (want >= 17.5) { f = fnt_h3; fpx = 19; }
-    else if (want >= 15.5) { f = fnt_bold; fpx = 15; }
-    else if (want < 14) { f = fnt_small; fpx = 13; }
+    else if (want >= 33) { f = fnt_h1; fpx = 40; }
+    else if (want >= 24) { f = fnt_h2; fpx = 27; }
+    else if (want >= 19.5) { f = fnt_h3; fpx = 21; }
+    else if (want >= 17.5) { f = fnt_bold; fpx = 17; }
+    else if (want < 16) { f = fnt_small; fpx = 15; }
     draw_set_font(f);
     var s = want / fpx;
     if (abs(s - 1) < 0.18) {
@@ -114,6 +114,29 @@ function ui_text_outline(tx, ty, str, col, out_col = c_black) {
 }
 
 /// @desc Truncates a string with an ellipsis so it fits within max_w pixels in the current font
+/// @desc Word-wraps text to max_w using the current font and keeps at most max_lines lines (the last one ends in "...")
+function ui_wrap_clamp(str, max_w, max_lines) {
+    var words = string_split(str, " ");
+    var lines = [];
+    var cur = "";
+    for (var i = 0; i < array_length(words); i++) {
+        var wd = words[i];
+        if (wd == "") continue;
+        var test = (cur == "") ? wd : (cur + " " + wd);
+        if (string_width(test) <= max_w || cur == "") cur = test;
+        else { array_push(lines, cur); cur = wd; }
+    }
+    if (cur != "") array_push(lines, cur);
+    if (array_length(lines) > max_lines) {
+        var last = lines[max_lines - 1] + " " + lines[max_lines];
+        array_resize(lines, max_lines);
+        lines[max_lines - 1] = ui_fit_text(last, max_w);
+    }
+    var out = "";
+    for (var i = 0; i < array_length(lines); i++) out += ((i > 0) ? "\n" : "") + ui_fit_text(lines[i], max_w);
+    return out;
+}
+
 function ui_fit_text(str, max_w) {
     if (string_width(str) <= max_w) return str;
     var s = str;
@@ -132,11 +155,16 @@ function ui_box(x1, y1, x2, y2, fill, border = undefined, r = 8, alpha = 1) {
     draw_set_alpha(a0 * alpha);
     draw_set_color(fill);
     draw_roundrect_ext(x1, y1, x2, y2, r, r, false);
-    // Top sheen
+    // Top sheen: soft vertical gradient (no hard edge)
     if (y2 - y1 > 14) {
-        draw_set_alpha(a0 * alpha * 0.06);
-        draw_set_color(c_white);
-        draw_roundrect_ext(x1 + 1, y1 + 1, x2 - 1, y1 + min(18, (y2 - y1) * 0.5), r, r, false);
+        var sh = min(22, (y2 - y1) * 0.55);
+        var inset = r * 0.35;
+        draw_primitive_begin(pr_trianglestrip);
+        draw_vertex_color(x1 + inset, y1 + 1, c_white, a0 * alpha * 0.07);
+        draw_vertex_color(x2 - inset, y1 + 1, c_white, a0 * alpha * 0.07);
+        draw_vertex_color(x1 + 1, y1 + sh, c_white, 0);
+        draw_vertex_color(x2 - 1, y1 + sh, c_white, 0);
+        draw_primitive_end();
     }
     if (!is_undefined(border)) {
         draw_set_alpha(a0 * alpha);
@@ -633,60 +661,261 @@ function ui_draw_alien_glyph(ax, ay, catalog_id, tier, size, anim_t = 0, flash =
     }
 }
 
-/// @desc Weapon emblem icon
+/// @desc Weapon emblem icon. Every weapon has its own silhouette and palette.
+/// Pass C_WEAPON for the full-colour version; any other colour draws a muted (spent / unavailable) version tinted with it.
 function ui_icon_weapon(wx, wy, catalog_id, size, col) {
     var s = size * 0.5;
-    var dark = merge_color(col, c_black, 0.5);
-    draw_set_color(dark);
-    draw_circle(wx, wy + s * 0.35, s * 0.55, false);
-    draw_set_color(col);
+    var live = (col == C_WEAPON);
+    var a0 = draw_get_alpha();
+    var mt   = ui_wi_tone(make_color_rgb(150, 162, 180), live, col);
+    var mt_d = ui_wi_tone(make_color_rgb(66, 76, 94), live, col);
+    var mt_l = ui_wi_tone(make_color_rgb(214, 222, 234), live, col);
+    var ink  = ui_wi_tone(make_color_rgb(18, 22, 30), live, col);
     switch (catalog_id) {
-        case "turret":
-            draw_rectangle(wx - s * 0.5, wy - s * 0.15, wx + s * 0.1, wy + s * 0.1, false);
-            draw_rectangle(wx - s * 0.5, wy + s * 0.18, wx + s * 0.1, wy + s * 0.4, false);
-            draw_rectangle(wx + s * 0.1, wy - s * 0.3, wx + s * 0.9, wy - s * 0.15, false);
-            draw_rectangle(wx + s * 0.1, wy + s * 0.05, wx + s * 0.9, wy + s * 0.2, false);
+        case "turret": {
+            var ac = ui_wi_tone(make_color_rgb(0, 229, 255), live, col);
+            ui_wi_base(wx, wy, s, mt_d, mt);
+            ui_wi_rrect(wx, wy, s, -0.6, -0.34, 0.18, 0.44, 0.18, mt);
+            ui_wi_rect(wx, wy, s, -0.48, 0.16, 0.06, 0.24, mt_d);
+            ui_wi_rect(wx, wy, s, 0.14, -0.22, 0.92, -0.07, mt_l);
+            ui_wi_rect(wx, wy, s, 0.14, 0.07, 0.92, 0.22, mt_l);
+            ui_wi_rect(wx, wy, s, 0.82, -0.27, 0.98, -0.02, mt_d);
+            ui_wi_rect(wx, wy, s, 0.82, 0.02, 0.98, 0.27, mt_d);
+            ui_wi_circ(wx, wy, s, -0.3, -0.1, 0.1, ac);
             break;
-        case "cannon":
-        case "plasma_mortar":
-            draw_circle(wx - s * 0.1, wy + s * 0.1, s * 0.45, false);
-            draw_line_width(wx, wy, wx + s * 0.85, wy - s * 0.6, s * 0.32);
+        }
+        case "gatling_gun": {
+            var brass = ui_wi_tone(make_color_rgb(255, 196, 64), live, col);
+            ui_wi_base(wx, wy, s, mt_d, mt);
+            ui_wi_circ(wx, wy, s, -0.4, 0.05, 0.38, mt);
+            ui_wi_circ(wx, wy, s, -0.4, 0.05, 0.17, mt_d);
+            ui_wi_line(wx, wy, s, -0.12, -0.17, 0.96, -0.17, 0.11, mt_l);
+            ui_wi_line(wx, wy, s, -0.12, 0.03, 0.96, 0.03, 0.11, mt_l);
+            ui_wi_line(wx, wy, s, -0.12, 0.23, 0.96, 0.23, 0.11, mt_l);
+            ui_wi_rect(wx, wy, s, 0.2, -0.3, 0.3, 0.36, mt_d);
+            ui_wi_rect(wx, wy, s, 0.74, -0.3, 0.82, 0.36, mt_d);
+            for (var b = 0; b < 4; b++) ui_wi_rect(wx, wy, s, -0.86 + b * 0.13, 0.3 - b * 0.05, -0.79 + b * 0.13, 0.46 - b * 0.05, brass);
             break;
-        case "railgun":
-            draw_rectangle(wx - s * 0.9, wy - s * 0.12, wx + s * 0.9, wy + s * 0.12, false);
-            draw_rectangle(wx - s * 0.6, wy - s * 0.32, wx + s * 0.6, wy - s * 0.2, false);
-            draw_rectangle(wx - s * 0.6, wy + s * 0.2, wx + s * 0.6, wy + s * 0.32, false);
+        }
+        case "cannon": {
+            var ac = ui_wi_tone(make_color_rgb(255, 140, 60), live, col);
+            ui_wi_base(wx, wy, s, mt_d, mt);
+            ui_wi_line(wx, wy, s, -0.2, 0.12, 0.72, -0.5, 0.4, mt_l);
+            ui_wi_circ(wx, wy, s, 0.72, -0.5, 0.25, mt_d);
+            ui_wi_circ(wx, wy, s, 0.72, -0.5, 0.12, ink);
+            ui_wi_circ(wx, wy, s, -0.22, 0.16, 0.42, mt_d);
+            ui_wi_circ(wx, wy, s, -0.22, 0.16, 0.3, mt);
+            ui_wi_circ(wx, wy, s, -0.22, 0.16, 0.1, ac);
             break;
-        case "tesla":
-        case "overcharge_pylon":
-        case "energy_pylon":
-            draw_rectangle(wx - s * 0.15, wy - s * 0.2, wx + s * 0.15, wy + s * 0.6, false);
-            draw_circle(wx, wy - s * 0.45, s * 0.32, false);
-            draw_set_color(c_white);
-            draw_line_width(wx - s * 0.5, wy - s * 0.8, wx - s * 0.2, wy - s * 0.55, 2);
-            draw_line_width(wx + s * 0.5, wy - s * 0.8, wx + s * 0.2, wy - s * 0.55, 2);
+        }
+        case "makeshift_cannon": {
+            var wood   = ui_wi_tone(make_color_rgb(168, 116, 64), live, col);
+            var wood_d = ui_wi_tone(make_color_rgb(98, 64, 34), live, col);
+            var rope   = ui_wi_tone(make_color_rgb(224, 190, 128), live, col);
+            var stone  = ui_wi_tone(make_color_rgb(140, 136, 130), live, col);
+            ui_wi_rect(wx, wy, s, -0.8, 0.52, 0.8, 0.8, wood_d);
+            ui_wi_line(wx, wy, s, -0.8, 0.66, 0.8, 0.66, 0.04, wood);
+            ui_wi_circ(wx, wy, s, -0.52, 0.4, 0.18, stone);
+            ui_wi_circ(wx, wy, s, 0.5, 0.42, 0.16, stone);
+            ui_wi_line(wx, wy, s, -0.5, 0.28, 0.7, -0.34, 0.36, wood);
+            // rope lashings across the barrel
+            for (var k = 0; k < 2; k++) {
+                var bx = lerp(-0.5, 0.7, 0.3 + k * 0.4), by = lerp(0.28, -0.34, 0.3 + k * 0.4);
+                ui_wi_line(wx, wy, s, bx - 0.1, by - 0.2, bx + 0.1, by + 0.2, 0.09, rope);
+            }
+            ui_wi_circ(wx, wy, s, 0.72, -0.35, 0.15, wood_d);
+            ui_wi_circ(wx, wy, s, 0.72, -0.35, 0.08, ink);
             break;
-        case "flamethrower":
-            draw_rectangle(wx - s * 0.8, wy - s * 0.15, wx + s * 0.3, wy + s * 0.15, false);
-            draw_set_color(make_color_rgb(255, 160, 40));
-            draw_triangle(wx + s * 0.3, wy - s * 0.35, wx + s * 0.3, wy + s * 0.35, wx + s, wy, false);
+        }
+        case "plasma_mortar": {
+            var ac = ui_wi_tone(make_color_rgb(200, 80, 255), live, col);
+            ui_wi_base(wx, wy, s, mt_d, mt);
+            ui_wi_line(wx, wy, s, -0.05, 0.12, 0.3, -0.6, 0.46, mt_l);
+            ui_wi_ell(wx, wy, s, 0.06, -0.74, 0.54, -0.5, mt_d);
+            ui_wi_rrect(wx, wy, s, -0.58, -0.02, 0.48, 0.48, 0.12, mt);
+            for (var v = 0; v < 3; v++) ui_wi_rect(wx, wy, s, -0.44 + v * 0.22, 0.14, -0.34 + v * 0.22, 0.34, ac);
+            draw_set_alpha(a0 * 0.35);
+            ui_wi_circ(wx, wy, s, 0.36, -0.82, 0.28, ac);
+            draw_set_alpha(a0);
+            ui_wi_circ(wx, wy, s, 0.36, -0.82, 0.16, ac);
             break;
-        case "shield_generator":
-            ui_icon_shield(wx, wy, size * 0.85, col);
+        }
+        case "railgun": {
+            var ac = ui_wi_tone(make_color_rgb(120, 230, 255), live, col);
+            ui_wi_base(wx, wy, s, mt_d, mt);
+            ui_wi_rrect(wx, wy, s, -0.9, -0.2, -0.22, 0.42, 0.1, mt);
+            ui_wi_rect(wx, wy, s, -0.26, -0.26, 1.0, -0.14, mt_l);
+            ui_wi_rect(wx, wy, s, -0.26, 0.14, 1.0, 0.26, mt_l);
+            draw_set_alpha(a0 * 0.6);
+            ui_wi_line(wx, wy, s, -0.22, 0, 1.0, 0, 0.06, ac);
+            draw_set_alpha(a0);
+            for (var c = 0; c < 3; c++) ui_wi_rect(wx, wy, s, 0.02 + c * 0.3, -0.14, 0.1 + c * 0.3, 0.14, ac);
+            ui_wi_circ(wx, wy, s, -0.56, 0.1, 0.12, ac);
             break;
-        case "cryo_emitter":
-            for (var i = 0; i < 3; i++) draw_line_width(wx + lengthdir_x(s * 0.8, i * 60), wy + lengthdir_y(s * 0.8, i * 60), wx - lengthdir_x(s * 0.8, i * 60), wy - lengthdir_y(s * 0.8, i * 60), 2);
+        }
+        case "lazer_gun": {
+            var ac = ui_wi_tone(make_color_rgb(255, 70, 90), live, col);
+            ui_wi_base(wx, wy, s, mt_d, mt);
+            ui_wi_tri(wx, wy, s, -0.5, -0.18, -0.05, -0.18, -0.35, -0.42, mt_d);
+            ui_wi_rrect(wx, wy, s, -0.75, -0.2, 0.42, 0.24, 0.2, mt);
+            ui_wi_line(wx, wy, s, -0.6, 0.02, 0.3, 0.02, 0.06, ac);
+            ui_wi_tri(wx, wy, s, 0.38, -0.26, 0.38, 0.3, 0.7, 0.02, mt_l);
+            draw_set_alpha(a0 * 0.35);
+            ui_wi_circ(wx, wy, s, 0.74, 0.02, 0.24, ac);
+            draw_set_alpha(a0);
+            ui_wi_circ(wx, wy, s, 0.74, 0.02, 0.12, ac);
+            ui_wi_line(wx, wy, s, 0.8, 0.02, 1.05, 0.02, 0.06, ac);
             break;
-        case "resource_drone":
-            draw_ellipse(wx - s * 0.5, wy - s * 0.2, wx + s * 0.5, wy + s * 0.25, false);
-            draw_line_width(wx - s * 0.9, wy - s * 0.35, wx + s * 0.9, wy - s * 0.35, 2);
+        }
+        case "flamethrower": {
+            var tank  = ui_wi_tone(make_color_rgb(205, 72, 52), live, col);
+            var fl_o  = ui_wi_tone(make_color_rgb(255, 130, 30), live, col);
+            var fl_y  = ui_wi_tone(make_color_rgb(255, 222, 90), live, col);
+            ui_wi_base(wx, wy, s, mt_d, mt);
+            ui_wi_rrect(wx, wy, s, -0.86, -0.4, -0.38, 0.46, 0.22, tank);
+            ui_wi_rect(wx, wy, s, -0.72, -0.5, -0.52, -0.38, mt_d);
+            ui_wi_line(wx, wy, s, -0.62, 0.1, -0.62, 0.32, 0.05, mt_l);
+            ui_wi_rect(wx, wy, s, -0.4, -0.07, 0.34, 0.13, mt_l);
+            ui_wi_rect(wx, wy, s, 0.28, -0.13, 0.42, 0.19, mt_d);
+            ui_wi_tri(wx, wy, s, 0.42, -0.26, 0.42, 0.32, 1.02, 0.03, fl_o);
+            ui_wi_tri(wx, wy, s, 0.42, -0.12, 0.42, 0.18, 0.8, 0.03, fl_y);
             break;
-        case "lazer_gun":
-        default:
-            draw_rectangle(wx - s * 0.7, wy - s * 0.18, wx + s * 0.55, wy + s * 0.18, false);
-            draw_set_color(make_color_rgb(255, 90, 90));
-            draw_circle(wx + s * 0.75, wy, s * 0.16, false);
+        }
+        case "tesla": {
+            var ac  = ui_wi_tone(make_color_rgb(120, 220, 255), live, col);
+            var cop = ui_wi_tone(make_color_rgb(214, 136, 72), live, col);
+            ui_wi_rect(wx, wy, s, -0.38, 0.58, 0.38, 0.82, mt_d);
+            ui_wi_rect(wx, wy, s, -0.08, -0.3, 0.08, 0.6, mt_d);
+            var ws = [0.5, 0.44, 0.38, 0.32];
+            for (var r = 0; r < 4; r++) ui_wi_ell(wx, wy, s, -ws[r], 0.42 - r * 0.2, ws[r], 0.56 - r * 0.2, (r % 2 == 0) ? cop : mt_d);
+            ui_wi_circ(wx, wy, s, 0, -0.46, 0.27, mt_l);
+            ui_wi_circ(wx, wy, s, -0.08, -0.54, 0.08, c_white);
+            ui_wi_line(wx, wy, s, -0.26, -0.5, -0.48, -0.32, 0.06, ac);
+            ui_wi_line(wx, wy, s, -0.48, -0.32, -0.64, -0.62, 0.06, ac);
+            ui_wi_line(wx, wy, s, -0.64, -0.62, -0.92, -0.44, 0.06, ac);
+            ui_wi_line(wx, wy, s, 0.26, -0.5, 0.48, -0.32, 0.06, ac);
+            ui_wi_line(wx, wy, s, 0.48, -0.32, 0.64, -0.62, 0.06, ac);
+            ui_wi_line(wx, wy, s, 0.64, -0.62, 0.92, -0.44, 0.06, ac);
+            break;
+        }
+        case "overcharge_pylon": {
+            var ac = ui_wi_tone(make_color_rgb(255, 214, 60), live, col);
+            ui_wi_rect(wx, wy, s, -0.48, 0.58, 0.48, 0.82, mt_d);
+            ui_wi_tri(wx, wy, s, -0.34, 0.58, 0.34, 0.58, 0.18, -0.58, mt);
+            ui_wi_tri(wx, wy, s, -0.34, 0.58, 0.18, -0.58, -0.18, -0.58, mt);
+            ui_wi_tri(wx, wy, s, -0.18, -0.58, 0.18, -0.58, 0, -0.95, ac);
+            for (var ch = 0; ch < 2; ch++) {
+                var cy2 = 0.36 - ch * 0.36;
+                ui_wi_line(wx, wy, s, -0.18, cy2, 0, cy2 - 0.18, 0.08, ac);
+                ui_wi_line(wx, wy, s, 0, cy2 - 0.18, 0.18, cy2, 0.08, ac);
+            }
+            ui_wi_line(wx, wy, s, 0.5, -0.5, 0.72, -0.72, 0.05, ac);
+            ui_wi_line(wx, wy, s, -0.5, -0.5, -0.72, -0.72, 0.05, ac);
+            break;
+        }
+        case "energy_pylon": {
+            var ac = ui_wi_tone(make_color_rgb(100, 240, 140), live, col);
+            ui_wi_rect(wx, wy, s, -0.16, -0.78, 0.16, -0.6, mt_l);
+            ui_wi_rrect(wx, wy, s, -0.44, -0.62, 0.44, 0.8, 0.14, mt_d);
+            ui_wi_rect(wx, wy, s, -0.32, -0.5, 0.32, 0.68, ink);
+            ui_wi_rect(wx, wy, s, -0.32, 0.02, 0.32, 0.68, ac);
+            ui_wi_tri(wx, wy, s, 0.12, -0.44, -0.22, 0.12, 0.06, 0.06, c_white);
+            ui_wi_tri(wx, wy, s, -0.06, -0.02, 0.22, -0.08, -0.12, 0.6, c_white);
+            break;
+        }
+        case "cryo_emitter": {
+            var ac = ui_wi_tone(make_color_rgb(150, 232, 255), live, col);
+            for (var arm = 0; arm < 6; arm++) {
+                var ang = arm * 60 + 90;
+                var ex = lengthdir_x(0.82, ang), ey = lengthdir_y(0.82, ang);
+                ui_wi_line(wx, wy, s, 0, 0, ex, ey, 0.1, ac);
+                var mx2 = lengthdir_x(0.5, ang), my2 = lengthdir_y(0.5, ang);
+                ui_wi_line(wx, wy, s, mx2, my2, mx2 + lengthdir_x(0.24, ang + 45), my2 + lengthdir_y(0.24, ang + 45), 0.07, ac);
+                ui_wi_line(wx, wy, s, mx2, my2, mx2 + lengthdir_x(0.24, ang - 45), my2 + lengthdir_y(0.24, ang - 45), 0.07, ac);
+            }
+            ui_wi_circ(wx, wy, s, 0, 0, 0.22, mt_l);
+            ui_wi_circ(wx, wy, s, 0, 0, 0.11, ac);
+            break;
+        }
+        case "shield_generator": {
+            var ac = ui_wi_tone(make_color_rgb(90, 170, 255), live, col);
+            var ac_d = ui_wi_tone(make_color_rgb(34, 70, 130), live, col);
+            // heater shield: rounded top, pointed bottom
+            ui_wi_rrect(wx, wy, s, -0.72, -0.82, 0.72, 0.1, 0.22, mt_d);
+            ui_wi_tri(wx, wy, s, -0.72, 0.0, 0.72, 0.0, 0, 0.9, mt_d);
+            ui_wi_rrect(wx, wy, s, -0.6, -0.7, 0.6, 0.06, 0.16, ac);
+            ui_wi_tri(wx, wy, s, -0.6, -0.02, 0.6, -0.02, 0, 0.74, ac);
+            ui_wi_rrect(wx, wy, s, -0.6, -0.7, 0.0, 0.06, 0.16, ac_d);
+            ui_wi_tri(wx, wy, s, -0.6, -0.02, 0.0, -0.02, 0, 0.74, ac_d);
+            // energy core
+            draw_set_alpha(a0 * 0.4);
+            ui_wi_circ(wx, wy, s, 0, -0.16, 0.3, c_white);
+            draw_set_alpha(a0);
+            ui_wi_circ(wx, wy, s, 0, -0.16, 0.16, mt_l);
+            break;
+        }
+        case "resource_drone": {
+            var crate = ui_wi_tone(make_color_rgb(196, 146, 80), live, col);
+            var crate_d = ui_wi_tone(make_color_rgb(120, 84, 40), live, col);
+            var ac = ui_wi_tone(make_color_rgb(100, 240, 140), live, col);
+            ui_wi_line(wx, wy, s, -0.74, -0.42, 0.74, -0.42, 0.09, mt_d);
+            ui_wi_rect(wx, wy, s, -0.78, -0.56, -0.7, -0.42, mt_d);
+            ui_wi_rect(wx, wy, s, 0.7, -0.56, 0.78, -0.42, mt_d);
+            draw_set_alpha(a0 * 0.85);
+            ui_wi_ell(wx, wy, s, -1.0, -0.64, -0.48, -0.52, mt_l);
+            ui_wi_ell(wx, wy, s, 0.48, -0.64, 1.0, -0.52, mt_l);
+            draw_set_alpha(a0);
+            ui_wi_rrect(wx, wy, s, -0.36, -0.54, 0.36, -0.14, 0.14, mt);
+            ui_wi_circ(wx, wy, s, 0, -0.34, 0.09, ac);
+            ui_wi_line(wx, wy, s, -0.18, -0.14, -0.3, 0.18, 0.07, mt_d);
+            ui_wi_line(wx, wy, s, 0.18, -0.14, 0.3, 0.18, 0.07, mt_d);
+            ui_wi_rect(wx, wy, s, -0.32, 0.16, 0.32, 0.74, crate);
+            ui_wi_line(wx, wy, s, -0.32, 0.16, 0.32, 0.74, 0.05, crate_d);
+            ui_wi_line(wx, wy, s, 0.32, 0.16, -0.32, 0.74, 0.05, crate_d);
+            break;
+        }
+        default: {
+            ui_wi_base(wx, wy, s, mt_d, mt);
+            ui_wi_rrect(wx, wy, s, -0.6, -0.25, 0.6, 0.35, 0.15, mt);
+            ui_wi_rect(wx, wy, s, 0.5, -0.06, 0.95, 0.12, mt_l);
+        }
     }
+    draw_set_alpha(a0);
+}
+
+/// @desc Icon colour: full colour when live, otherwise a muted tint of the given colour
+function ui_wi_tone(rgb, live, col) {
+    return live ? rgb : merge_color(col, rgb, 0.22);
+}
+/// @desc Gun mount shared by the turret-style weapons
+function ui_wi_base(wx, wy, s, c_dark, c_mid) {
+    ui_wi_tri(wx, wy, s, -0.64, 0.84, 0.64, 0.84, 0.42, 0.5, c_dark);
+    ui_wi_tri(wx, wy, s, -0.64, 0.84, 0.42, 0.5, -0.42, 0.5, c_dark);
+    ui_wi_rect(wx, wy, s, -0.48, 0.44, 0.48, 0.54, c_mid);
+}
+function ui_wi_rect(wx, wy, s, x1, y1, x2, y2, c) {
+    draw_set_color(c);
+    draw_rectangle(wx + x1 * s, wy + y1 * s, wx + x2 * s, wy + y2 * s, false);
+}
+function ui_wi_rrect(wx, wy, s, x1, y1, x2, y2, r, c) {
+    draw_set_color(c);
+    draw_roundrect_ext(wx + x1 * s, wy + y1 * s, wx + x2 * s, wy + y2 * s, r * s * 2, r * s * 2, false);
+}
+function ui_wi_circ(wx, wy, s, cx, cy, r, c) {
+    draw_set_color(c);
+    draw_circle(wx + cx * s, wy + cy * s, max(1, r * s), false);
+}
+function ui_wi_ell(wx, wy, s, x1, y1, x2, y2, c) {
+    draw_set_color(c);
+    draw_ellipse(wx + x1 * s, wy + y1 * s, wx + x2 * s, wy + y2 * s, false);
+}
+function ui_wi_line(wx, wy, s, x1, y1, x2, y2, w, c) {
+    draw_set_color(c);
+    draw_line_width(wx + x1 * s, wy + y1 * s, wx + x2 * s, wy + y2 * s, max(1, w * s));
+}
+function ui_wi_tri(wx, wy, s, x1, y1, x2, y2, x3, y3, c) {
+    draw_set_color(c);
+    draw_triangle(wx + x1 * s, wy + y1 * s, wx + x2 * s, wy + y2 * s, wx + x3 * s, wy + y3 * s, false);
 }
 
 /// @desc Mouse position in GUI space (overridable by the autotest harness)
@@ -697,4 +926,28 @@ function ui_mouse_x() {
 function ui_mouse_y() {
     if (autotest_active()) return global.at.mouse_y;
     return device_mouse_y_to_gui(0);
+}
+
+/// @desc Autotest only: every weapon icon at the sizes the game uses, live and muted
+function ui_draw_weapon_icon_gallery() {
+    draw_set_color(C_BG1);
+    draw_rectangle(0, 0, 1920, 1080, false);
+    var cat = game_get_weapon_catalog();
+    var ids = [], names = [];
+    for (var i = 0; i < array_length(cat); i++) { array_push(ids, cat[i].id); array_push(names, cat[i].name); }
+    array_push(ids, "makeshift_cannon"); array_push(names, "Makeshift Cannon");
+    var cols = 5;
+    for (var i = 0; i < array_length(ids); i++) {
+        var cx = 40 + (i mod cols) * 376, cy = 30 + (i div cols) * 345;
+        ui_box(cx, cy, cx + 356, cy + 325, C_PANEL, C_LINE, 10);
+        ui_icon_weapon(cx + 110, cy + 120, ids[i], 150, C_WEAPON);
+        ui_icon_weapon(cx + 270, cy + 80, ids[i], 50, C_WEAPON);
+        ui_icon_weapon(cx + 270, cy + 160, ids[i], 50, C_FAINT);
+        ui_icon_weapon(cx + 250, cy + 230, ids[i], 18, C_WEAPON);
+        ui_icon_weapon(cx + 290, cy + 230, ids[i], 16, C_WEAPON);
+        draw_set_font(fnt_h3);
+        draw_set_halign(fa_center); draw_set_valign(fa_middle);
+        draw_set_color(C_TEXT);
+        draw_text(cx + 178, cy + 290, names[i]);
+    }
 }

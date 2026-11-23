@@ -1,6 +1,6 @@
 # Alien Game (v2.1)
 
-A tactical co-op sci-fi defense game built in GameMaker. Hold the outpost for 17 days: gather resources, trade for gold, buy weapon blueprints, forge them onto your four towers, and survive the alien waves that hit the walls at the end of every day.
+A tactical co-op sci-fi defense game built in GameMaker. Hold the outpost for 20 days: gather resources, trade for gold, buy weapon blueprints, forge them onto your four towers, and survive the alien waves that hit the walls at the end of every day.
 
 ---
 
@@ -16,7 +16,14 @@ A tactical co-op sci-fi defense game built in GameMaker. Hold the outpost for 17
 
 - **Planning:** every operative has energy. Walk the map (1–2 energy per move), gather at the Forest and Caves, sell in Town, buy blueprints at the Shop and forge them onto towers at the Workstation.
 - **Defense:** when the squad is out of energy (or you press **Defend**), arm a tower weapon and click an alien to fire. Survivors strike back at your towers — mounted weapons absorb hits first.
-- Survive Day 17 and clear the final wave to win, or keep going in Endless Mode.
+- Survive Day 20 and clear the final wave to win, or keep going in Endless Mode.
+- Each morning a banner warns you about anything that just reached the walls — it attacks at the end of that day.
+- **Workshop extras:** Forge Metal (1 Stone + 1 Scrap), reinforce a tower (+5 max HP for 45 Gold, 3 Power Gems, 10 Metal), and rebuild a fallen tower once (50 Gold, 4 Power Gems, 10 Metal).
+- **Gatling Gun:** 5 shots of 1 damage, 12 HP (6 Gold, 2 Metal, 3 Scrap). Great against swarms of small aliens and with Overcharge Pylons.
+- **Starter weapon:** every mission begins with the **Makeshift Cannon** blueprint (3 Stone, 2 Wood, 1 Scrap; 5 damage, 4 HP). It's never used up, so you can always forge one onto an empty tower.
+- **Starting gold:** solo 0, duo 5, trio 10, squad of four 15.
+- **Market:** pick items with + / - (mix any resources); each trade sells up to 3 items for one action's energy, and the total gold and energy are shown before you sell.
+- **Energy Pylon:** solo +5 energy per day; duo +2 each; trio +1 each with one operative (rotating daily) getting +2; squad of 4 +1 each.
 
 ## Controls
 
@@ -26,7 +33,7 @@ A tactical co-op sci-fi defense game built in GameMaker. Hold the outpost for 17
 | Click a location | Move there, or interact if you're standing on it |
 | `E` | Interact with your current location |
 | `G` | Gather |
-| `C` / `X` | Forge Metal / Dismantle a tower weapon |
+| `C` / `X` | Forge Metal (in the Workshop) / Demolish a tower weapon (get up to 75% of its materials back) |
 | `S` `R` `T` | Shop, Workshop, Market |
 | `F` | Fire the tower weapon you're standing on |
 | `Space` | End turn (online: Ready Up) |
@@ -34,6 +41,8 @@ A tactical co-op sci-fi defense game built in GameMaker. Hold the outpost for 17
 | `Tab` / `1`–`4` | Switch operative (local play) |
 | `Enter` | Chat / add a note to the log |
 | `Esc` | Pause menu · `F1` / `H` How to Play · `F11` Fullscreen |
+
+The action bar shows two buttons for wherever you're standing (e.g. Gather in the Forest, Fire/Demolish on a tower) plus End Turn and Defend.
 
 In the defense view: `1`–`4` arm a weapon, click an alien to fire, `Space` ends the volley / continues, `Tab` toggles 2x speed.
 

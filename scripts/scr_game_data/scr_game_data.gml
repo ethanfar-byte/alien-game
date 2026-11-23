@@ -130,6 +130,16 @@ function game_get_weapon_catalog() {
             target_count: 2
         },
         {
+            id: "gatling_gun",
+            name: "Gatling Gun",
+            hp: 12,
+            damage: 1,
+            cost_gold: 6,
+            cost_res: { metal: 2, scrap: 3 },
+            ability: "Fires 5 shots of 1 damage. Shreds Hatchlings and Scouts, and every bonus (Overcharge +3, Burning +1) applies to each shot.",
+            target_count: 5
+        },
+        {
             id: "flamethrower",
             name: "Flamethrower",
             hp: 8,
@@ -146,7 +156,7 @@ function game_get_weapon_catalog() {
             damage: 20,
             cost_gold: 18,
             cost_res: { metal: 5, power_gem: 3 },
-            ability: "Attacks every other wave. Overkill damage carries over to another alien.",
+            ability: "Attacks every other wave. Overkill damage pierces into the aliens on both sides (all of it if only one side has one).",
             target_count: 1,
             cooldown_wave: 2
         },
@@ -193,11 +203,11 @@ function game_get_weapon_catalog() {
         {
             id: "resource_drone",
             name: "Resource Drone",
-            hp: 5,
+            hp: 7,
             damage: 0,
-            cost_gold: 14,
-            cost_res: { scrap: 4, crystals: 2, power_gem: 1 },
-            ability: "Gathers 1 random Forest or Cave 1 card when used each turn.",
+            cost_gold: 10,
+            cost_res: { scrap: 3, crystals: 1 },
+            ability: "Every morning gathers 3 resource cards for free: one each from the Forest, Cave 1 and Cave 2 (Metal and Power Gems).",
             target_count: 0
         },
         {
@@ -207,7 +217,7 @@ function game_get_weapon_catalog() {
             damage: 7,
             cost_gold: 13,
             cost_res: { metal: 4, crystals: 2, power_gem: 1 },
-            ability: "Deals 7 damage to primary target, and 3 damage to two additional aliens.",
+            ability: "Deals 7 damage to its target and lobs 3 damage onto the aliens on either side.",
             target_count: 1,
             splash_count: 2,
             splash_dmg: 3
@@ -229,7 +239,7 @@ function game_get_weapon_catalog() {
             damage: 0,
             cost_gold: 12,
             cost_res: { crystals: 2, wood: 2, power_gem: 1 },
-            ability: "Every turn, all players get +1 extra energy. Cannot attack.",
+            ability: "Every day: solo +5 energy; duo +2 each; trio +1 each with +1 extra rotating daily; squad +1 each. Cannot attack.",
             target_count: 0
         },
         {
@@ -279,7 +289,7 @@ function game_get_alien_catalog() {
         // Tier 1
         scout: { name: "Scout", tier: 1, hp: 4, damage: 1, ability: "Must be killed before other aliens can be targeted." },
         acid_spitter: { name: "Acid Spitter", tier: 1, hp: 5, damage: 2, ability: "Deals double damage to weapons." },
-        hatcher: { name: "Hatcher", tier: 1, hp: 7, damage: 1, ability: "If alive at end of turn, spawns 2 Hatchlings (2 HP, 1 Dmg)." },
+        hatcher: { name: "Hatcher", tier: 1, hp: 7, damage: 1, ability: "Spawns 1 Hatchling (2 HP, 1 Dmg) after its first day at the walls, then 2 every day after." },
         drone: { name: "Drone", tier: 1, hp: 9, damage: 3, ability: "None." },
         drooper: { name: "Drooper", tier: 1, hp: 6, damage: 1, ability: "Hits all 4 towers/weapons simultaneously." },
         hatchling: { name: "Hatchling", tier: 1, hp: 2, damage: 1, ability: "Spawned by Hatcher." },
@@ -292,7 +302,7 @@ function game_get_alien_catalog() {
         the_syphon: { name: "The Syphon", tier: 2, hp: 14, damage: 2, ability: "When attacking, causes a random player to lose 1 energy next turn." },
         
         // Tier 3
-        goliath: { name: "Goliath", tier: 3, hp: 35, damage: 7, ability: "Ignores weapons (except Shield) and attacks a tower directly." },
+        goliath: { name: "Goliath", tier: 3, hp: 35, damage: 6, ability: "Ignores weapons (except Shield) and attacks a tower directly." },
         emp_weaver: { name: "EMP Weaver", tier: 3, hp: 20, damage: 4, ability: "Disables the highest-damage weapon while alive." },
         broodlord: { name: "Broodlord", tier: 3, hp: 25, damage: 5, ability: "When drawn, immediately draws and spawns two Tier 1 aliens." },
         apex_predator: { name: "Apex Predator", tier: 3, hp: 40, damage: 8, ability: "Cannot take more than 10 damage from a single attack." },
@@ -308,24 +318,28 @@ function game_get_alien_tier_pool(tier) {
 }
 
 function game_get_waves() {
+    // 20-day campaign. Days 14-16 are the transition from tier 2 to tier 3 threats.
     return [
-        [],                 // Wave 1 (Grace)
-        [],                 // Wave 2 (Grace)
-        [1],                // Wave 3
-        [],                 // Wave 4
-        [1],                // Wave 5
-        [1, 1],             // Wave 6
-        [1, 1, 1],          // Wave 7
-        [1, 1, 1, 1],       // Wave 8
-        [2, 2],             // Wave 9
-        [2, 1, 1],          // Wave 10
-        [2, 2, 1],          // Wave 11
-        [2, 2, 2],          // Wave 12
-        [2, 2, 2, 1],       // Wave 13
-        [3, 3],             // Wave 14
-        [3, 2, 2],          // Wave 15
-        [3, 3, 2],          // Wave 16
-        [3, 3, 3]           // Wave 17 (Final main wave)
+        [],                 // Day 1  (grace)
+        [],                 // Day 2  (grace)
+        [1],                // Day 3
+        [],                 // Day 4
+        [1],                // Day 5
+        [1, 1],             // Day 6
+        [1, 1, 1],          // Day 7
+        [1, 1, 1, 1],       // Day 8
+        [2, 1],             // Day 9
+        [2, 2],             // Day 10
+        [2, 2, 1],          // Day 11
+        [2, 2, 2],          // Day 12
+        [2, 2, 2, 1],       // Day 13
+        [3, 2],             // Day 14 (new: first tier 3 arrives with an escort)
+        [2, 2, 2, 2],       // Day 15 (new: breather of massed tier 2s)
+        [3, 2, 1],          // Day 16 (new)
+        [3, 3],             // Day 17
+        [3, 2, 2],          // Day 18
+        [3, 3, 2],          // Day 19
+        [3, 3, 3]           // Day 20 (final wave)
     ];
 }
 
@@ -392,3 +406,20 @@ function game_get_town_favors() {
     ];
 }
 
+
+/// @desc The squad's permanent starter blueprint. Never sold in the shop and never used up:
+/// it stays in the Workshop list so a cheap gun can always be forged from Stone and Wood.
+function game_get_starter_blueprint() {
+    return {
+        catalog_id: "makeshift_cannon",
+        name: "Makeshift Cannon",
+        hp: 4,
+        damage: 5,
+        cost_res: { stone: 3, wood: 2, scrap: 1 },
+        ability: "Starter weapon: a fragile, scrap-built cannon. Always available to forge - it never leaves your blueprints.",
+        target_count: 1,
+        splash_count: 0,
+        splash_dmg: 0,
+        starter: true
+    };
+}
