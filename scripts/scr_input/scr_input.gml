@@ -144,15 +144,7 @@ function input_display_hotkeys(state) {
         game_apply_display_settings(state.settings.display_mode, r[0], r[1]);
         game_play_sfx("click");
     }
-    // Drop to windowed when tabbing out of exclusive/borderless fullscreen so the desktop stays usable
-    var cur_focus = window_has_focus();
-    if (cur_focus) state.has_had_focus = true;
-    if (state.has_had_focus && !cur_focus && state.prev_window_focus && state.settings.display_mode != "windowed" && !autotest_active()) {
-        state.settings.display_mode = "windowed";
-        var r2 = state.resolutions[state.settings.resolution_idx];
-        game_apply_display_settings("windowed", r2[0], r2[1]);
-    }
-    state.prev_window_focus = cur_focus;
+    // Tabbing out keeps the chosen display mode (fullscreen stays fullscreen); only F11 or Settings change it
 }
 
 /// @desc Shared text-entry helper on keyboard_string; returns the trimmed-to-length string

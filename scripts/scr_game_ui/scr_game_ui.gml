@@ -1159,6 +1159,28 @@ function ui_draw_title_screen(state, mx, my) {
     draw_text(kx, 1030, "Fullscreen");
     draw_set_halign(fa_right);
     draw_text(1890, 1030, "v2.1  -  LAN ports TCP 6510 / UDP 6511");
+
+    // Credits (top right)
+    var credits = ["Ethan Farrell", "Owen Delgado", "Joshua Gallo"];
+    var cr_a = clamp(intro, 0, 1);
+    var cr_x1 = 1880, cr_y = 70;
+    var cr_w = 300;
+    draw_set_alpha(0.55 * cr_a);
+    draw_set_color(make_color_rgb(8, 14, 24));
+    draw_roundrect_ext(cr_x1 - cr_w, cr_y, cr_x1, cr_y + 58 + array_length(credits) * 34, 12, 12, false);
+    draw_set_alpha(cr_a);
+    draw_set_color(C_ACCENT);
+    draw_line_width(cr_x1 - cr_w + 20, cr_y + 46, cr_x1 - 20, cr_y + 46, 2);
+    draw_set_font(fnt_small);
+    draw_set_halign(fa_right); draw_set_valign(fa_middle);
+    draw_set_color(C_ACCENT);
+    draw_text(cr_x1 - 20, cr_y + 26, "CREATED BY");
+    draw_set_font(fnt_h3);
+    for (var ci = 0; ci < array_length(credits); ci++) {
+        draw_set_color(c_white);
+        draw_text(cr_x1 - 20, cr_y + 72 + ci * 34, credits[ci]);
+    }
+    draw_set_alpha(1);
     draw_set_font(fnt_body);
 }
 
@@ -1192,7 +1214,7 @@ function ui_draw_local_setup_screen(state, mx, my) {
     draw_set_color(C_AMBER);
     ui_text_scaled(con_x + 30, con_y + 32, "TACTICAL SQUAD BRIEFING // ROSTER ALLOCATION", 1.35);
     draw_set_color(make_color_rgb(140, 180, 215));
-    draw_text(con_x + 30, con_y + 54, "Select operative count and assign specialized tactical classes. Team size dynamically scales starting operative energy.");
+    draw_text(con_x + 30, con_y + 54, "Select operative count and assign specialized tactical classes.");
     
     // -----------------------------------------------------------------
     // SECTION 1: SQUAD SIZE SELECTOR CARDS (Top Row)
@@ -1203,10 +1225,10 @@ function ui_draw_local_setup_screen(state, mx, my) {
     var count_w = (con_w - 60 - count_spacing * 3) / 4;
     
     var size_info = [
-        ["1 SOLO SURVIVOR", "3x Base Energy (15+ Energy)", "Pure solo endurance"],
-        ["2 DUO SQUAD", "1.5x Base Energy (7+ Energy)", "Coordinated tactical pair"],
-        ["3 TRIO FIRETEAM", "Standard Base Energy (5+ Energy)", "Balanced squad distribution"],
-        ["4 BATTALION", "-1 Energy Modifier (4+ Energy)", "Full 4-corner defense coverage"]
+        ["1 SOLO SURVIVOR", "Pure solo endurance"],
+        ["2 DUO SQUAD", "Coordinated tactical pair"],
+        ["3 TRIO FIRETEAM", "Balanced squad distribution"],
+        ["4 BATTALION", "Full 4-corner defense coverage"]
     ];
     
     for (var c = 0; c < 4; c++) {
@@ -1225,13 +1247,10 @@ function ui_draw_local_setup_screen(state, mx, my) {
         
         draw_set_halign(fa_left); draw_set_valign(fa_top);
         draw_set_color(is_sel ? C_AMBER : (chov ? c_white : make_color_rgb(180, 205, 230)));
-        ui_text_scaled(cx + 16, count_y + 10, size_info[c][0], 1.1);
-        
-        draw_set_color(is_sel ? make_color_rgb(255, 235, 59) : make_color_rgb(120, 180, 160));
-        draw_text(cx + 16, count_y + 32, size_info[c][1]);
-        
-        draw_set_color(make_color_rgb(130, 145, 165));
-        draw_text(cx + 16, count_y + 50, size_info[c][2]);
+        ui_text_scaled(cx + 16, count_y + 14, size_info[c][0], 1.1);
+
+        draw_set_color(is_sel ? make_color_rgb(200, 215, 235) : make_color_rgb(130, 145, 165));
+        draw_text(cx + 16, count_y + 44, size_info[c][1]);
         
         // Active radio check indicator on right
         var rad_x = cx + count_w - 24;

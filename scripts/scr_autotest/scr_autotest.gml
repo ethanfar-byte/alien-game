@@ -176,7 +176,9 @@ function autotest_scenario_ui_tour() {
     };
     array_push(s, autotest_step(40, function(st) { autotest_mouse(300, 455); }));
     array_push(s, shot("01_title", 30));
-    array_push(s, autotest_step(2, function(st) { autotest_mouse(-1000, -1000); ui_transition_to(st, "local_setup"); st.setup_player_count = 3; st.setup_player_classes = [1, 2, 4, 0]; }));
+    array_push(s, autotest_step(2, function(st) { autotest_mouse(-1000, -1000); ui_transition_to(st, "local_setup"); }));
+    array_push(s, shot("02a_local_setup_default", 20));
+    array_push(s, autotest_step(2, function(st) { autotest_check(st.setup_player_count == 1, "squad size defaults to 1 player"); st.setup_player_count = 3; st.setup_player_classes = [1, 2, 4, 0]; }));
     array_push(s, shot("02_local_setup", 30));
     array_push(s, autotest_step(2, function(st) {
         input_launch_local(st);

@@ -11,6 +11,7 @@ game_apply_display_settings("borderless", 1920, 1080);
 display_set_gui_size(1920, 1080);
 
 game_state = game_init_state(4);
+game_state.setup_player_count = 1; // the squad-size selector starts on solo
 game_state.screen = "title";
 game_state.modal = undefined;
 game_state.title_sel = 0;
